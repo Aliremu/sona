@@ -139,4 +139,8 @@
   *:focus-visible {
     @apply outline-2 outline-offset-2 outline-accent/50;
   }
+
+  *[data-state='inactive'] {
+    display: none;
+  }
 }

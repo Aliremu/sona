@@ -38,7 +38,7 @@ export function VstDock({
   if (sidebarCollapsed) {
     return (
       <div
-        className="absolute bottom-0 left-0 w-16 h-16 bg-background/95 backdrop-blur-xl border-t border-r shadow-lg flex items-center justify-center cursor-pointer hover:bg-accent/10 transition-colors"
+        className="absolute bottom-0 left-0 w-full h-16 bg-background/95 backdrop-blur-xl border-t border-r shadow-lg flex items-center justify-center cursor-pointer hover:bg-accent/10 transition-colors"
         onClick={() => {
           onExpandSidebar?.()
           onToggleExpanded() // Also expand the VST rack when clicked
@@ -53,7 +53,7 @@ export function VstDock({
   return (
     <div
       className={`absolute bottom-0 left-0 bg-background/95 backdrop-blur-xl border-t shadow-lg transition-all duration-300 ease-in-out ${
-        expanded ? "h-72" : "h-[70px]"
+        expanded ? "h-72" : "h-16"
       } w-full`}
       style={{
         // Inherit width from parent (playlist sidebar). Min width enforced there.

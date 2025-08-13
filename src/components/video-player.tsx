@@ -51,7 +51,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
         </video>
 
         {/* Video Info Overlay */}
-        <div className="absolute top-4 left-4">
+        {/* <div className="absolute top-4 left-4">
           <Card className="bg-black/80 border-white/20">
             <CardContent className="p-3">
               <div className="flex items-center gap-3">
@@ -70,10 +70,10 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
               </div>
             </CardContent>
           </Card>
-        </div>
+        </div> */}
 
         {/* BPM Overlay */}
-        <div className="absolute top-4 right-4">
+        {/* <div className="absolute top-4 right-4">
           <Card className="bg-black/80 border-white/20">
             <CardContent className="p-3">
               <div className="flex items-center gap-2 text-white">
@@ -87,7 +87,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(
               </div>
             </CardContent>
           </Card>
-        </div>
+        </div> */}
       </div>
     )
   },

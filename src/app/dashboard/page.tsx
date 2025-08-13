@@ -303,7 +303,7 @@ export default function MusicPracticeApp() {
             </div>
 
             {/* Video Playback Tab */}
-            <TabsContent value="video" className="flex-1 overflow-hidden m-0">
+            <TabsContent value="video" className="flex-1 overflow-hidden m-0" forceMount>
               <div className="h-full px-8 pb-8">
                 {showVisualizer ? (
                   <div className="h-full rounded-2xl border border-border/50 bg-card/50 backdrop-blur-sm shadow-xl shadow-black/5">
@@ -333,7 +333,7 @@ export default function MusicPracticeApp() {
             </TabsContent>
 
             {/* Sheet Music Tab */}
-            <TabsContent value="sheet" className="flex-1 overflow-hidden m-0">
+            <TabsContent value="sheet" className="flex-1 overflow-hidden m-0" forceMount>
               <div className="h-full px-8 pb-8">
                 {showVisualizer ? (
                   <div className="h-full rounded-2xl border border-border/50 bg-card/50 backdrop-blur-sm shadow-xl shadow-black/5">

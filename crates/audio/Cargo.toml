@@ -1,0 +1,16 @@
+[package]
+name = "audio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vst3.workspace = true
+anyhow.workspace = true
+cpal.workspace = true
+log.workspace = true
+ringbuf.workspace = true
+rodio.workspace = true
+rubato = "0.16.0"
+rustc-hash.workspace = true
+thiserror.workspace = true
+tracing-subscriber.workspace = true

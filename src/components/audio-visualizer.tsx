@@ -3,12 +3,16 @@
 import { useEffect, useRef, useCallback } from "react"
 
 interface AudioVisualizerProps {
+  videoElement?: HTMLVideoElement | null
   isPlaying: boolean
 }
 
-export function AudioVisualizer({ isPlaying }: AudioVisualizerProps) {
+export function AudioVisualizer({ videoElement, isPlaying }: AudioVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationRef = useRef<number | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null)
 
   const renderFrame = useCallback(() => {
     if (!canvasRef.current) return
@@ -26,16 +30,36 @@ export function AudioVisualizer({ isPlaying }: AudioVisualizerProps) {
 
     if (!isPlaying) return
 
-    // Generate animated frequency bars
+    let frequencyData: Uint8Array | null = null
+
+    // Get real audio data if available
+    if (analyserRef.current) {
+      const bufferLength = analyserRef.current.frequencyBinCount
+      const dataArray = new Uint8Array(new ArrayBuffer(bufferLength))
+      analyserRef.current.getByteFrequencyData(dataArray)
+      frequencyData = dataArray
+    }
+
+    // Generate frequency bars
     const barCount = 64
     const barWidth = (width / barCount) * 0.8
     const gap = (width / barCount) * 0.2
 
     for (let i = 0; i < barCount; i++) {
-      const frequency = Math.sin(Date.now() * 0.002 + i * 0.15) * 0.5 + 0.5
+      let frequency: number
+
+      if (frequencyData) {
+        // Use real audio data
+        const dataIndex = Math.floor((i / barCount) * (frequencyData.length / 2))
+        frequency = frequencyData[dataIndex] / 255
+      } else {
+        // Fallback to animated bars
+        frequency = Math.sin(Date.now() * 0.002 + i * 0.15) * 0.5 + 0.5
+      }
+
       const barHeight = frequency * height * 0.7
 
-      // Simple color based on frequency range
+      // Color based on frequency range
       let color = "hsl(var(--primary))"
       if (i < barCount / 3) {
         color = "#10b981" // emerald
@@ -63,6 +87,51 @@ export function AudioVisualizer({ isPlaying }: AudioVisualizerProps) {
       animationRef.current = requestAnimationFrame(renderFrame)
     }
   }, [isPlaying])
+
+  // Set up audio context and analyser when video element is available
+  useEffect(() => {
+    if (!videoElement) return
+
+    const setupAudioContext = async () => {
+      try {
+        // Clean up existing audio context
+        if (audioContextRef.current) {
+          await audioContextRef.current.close()
+        }
+
+        // Create new audio context
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        audioContextRef.current = audioContext
+
+        // Create analyser
+        const analyser = audioContext.createAnalyser()
+        analyser.fftSize = 256
+        analyser.smoothingTimeConstant = 0.8
+        analyserRef.current = analyser
+
+        // Create source from video element (only if not already created)
+        if (!sourceRef.current) {
+          const source = audioContext.createMediaElementSource(videoElement)
+          sourceRef.current = source
+          
+          // Connect source to analyser and destination
+          source.connect(analyser)
+          source.connect(audioContext.destination)
+        }
+      } catch (error) {
+        console.warn('Failed to setup audio context:', error)
+      }
+    }
+
+    setupAudioContext()
+
+    return () => {
+      // Cleanup on unmount
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close()
+      }
+    }
+  }, [videoElement])
 
   useEffect(() => {
     if (isPlaying) {

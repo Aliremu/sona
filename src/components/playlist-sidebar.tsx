@@ -169,7 +169,8 @@ export function PlaylistSidebar({
       </div>
 
       {/* Playlists */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 pb-16 min-h-0">
+      <ScrollArea className="flex-1 h-full">
         <div className="p-2 space-y-1">
           {playlists.map((playlist) => (
             <Collapsible
@@ -326,6 +327,7 @@ export function PlaylistSidebar({
           ))}
         </div>
       </ScrollArea>
+      </div>
       {children}
     </div>
   )
