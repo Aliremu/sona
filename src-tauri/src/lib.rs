@@ -48,8 +48,8 @@ fn open_plugin(manager: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Err
     let hwnd = window.hwnd()?.0;
 
     unsafe {
-        engine.add_plugin("");
-        let modules = engine.plugin_modules.read().unwrap();
+        engine.add_plugin("C:\\Coding\\Projects\\lyre\\plugins\\Archetype Nolly.vst3");
+        let modules = engine.plugin_modules();
 
         let plugin = modules.first().expect("Could not get plugin 0!");
 
