@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTheme } from "next-themes"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Settings, Folder, Volume2, Mic, Headphones, Sliders, Palette } from "lucide-react"
+import { invoke } from "@tauri-apps/api/core"
 
 interface SettingsModalProps {
   open: boolean
@@ -20,15 +21,36 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const { theme, setTheme } = useTheme()
   const [activeTab, setActiveTab] = useState("audio")
   const [pluginDirectory, setPluginDirectory] = useState("/Users/username/Audio/Plug-Ins/VST3")
+
+  const [availableHosts, setAvailableHosts] = useState<string[]>([])
   const [audioDriver, setAudioDriver] = useState("asio")
+
+  const [availableInputDevices, setAvailableInputDevices] = useState<string[]>([])
   const [inputDevice, setInputDevice] = useState("focusrite-scarlett")
+
+  const [availableOutputDevices, setAvailableOutputDevices] = useState<string[]>([])
   const [outputDevice, setOutputDevice] = useState("focusrite-scarlett")
+
   const [sampleRate, setSampleRate] = useState("44100")
   const [bufferSize, setBufferSize] = useState("256")
   const [inputGain, setInputGain] = useState(75)
   const [outputGain, setOutputGain] = useState(80)
   const [enableLowLatency, setEnableLowLatency] = useState(true)
   const [enableMetronome, setEnableMetronome] = useState(false)
+
+  useMemo(async () => {
+    const inputDevices: string[] = await invoke('get_input_devices');
+    setAvailableInputDevices(inputDevices);
+
+    const outputDevices: string[] = await invoke('get_output_devices');
+    setAvailableOutputDevices(outputDevices);
+  }, [setAudioDriver]);
+
+  useMemo(() => {
+    invoke('get_hosts').then((hosts) => {
+        setAvailableHosts(hosts as string[]);
+    });
+  }, []);
 
   const tabs = [
     { id: "audio", label: "Audio", icon: Volume2 },
@@ -89,15 +111,16 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         Audio Driver
                       </Label>
                       <Select value={audioDriver} onValueChange={setAudioDriver}>
-                        <SelectTrigger className="focus:ring-accent focus:border-accent">
+                        <SelectTrigger className="focus:ring-accent focus:border-accent w-24 max-w-24">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="asio">ASIO</SelectItem>
-                          <SelectItem value="directsound">DirectSound</SelectItem>
-                          <SelectItem value="wasapi">WASAPI</SelectItem>
-                          <SelectItem value="coreaudio">Core Audio</SelectItem>
-                        </SelectContent>
+                            {availableHosts.map((host) => (
+                              <SelectItem key={host} value={host}>
+                                {host}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
                       </Select>
                     </div>
 
@@ -111,13 +134,15 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                           Input Device
                         </Label>
                         <Select value={inputDevice} onValueChange={setInputDevice}>
-                          <SelectTrigger className="focus:ring-accent focus:border-accent">
+                          <SelectTrigger className="focus:ring-accent focus:border-accent w-64 max-w-64">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="focusrite-scarlett">Focusrite Scarlett 2i2</SelectItem>
-                            <SelectItem value="built-in-mic">Built-in Microphone</SelectItem>
-                            <SelectItem value="usb-audio">USB Audio Interface</SelectItem>
+                            {availableInputDevices.map((device) => (
+                              <SelectItem key={device} value={device}>
+                                {device}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -128,13 +153,15 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                           Output Device
                         </Label>
                         <Select value={outputDevice} onValueChange={setOutputDevice}>
-                          <SelectTrigger className="focus:ring-accent focus:border-accent">
+                          <SelectTrigger className="focus:ring-accent focus:border-accent w-64 max-w-64">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="focusrite-scarlett">Focusrite Scarlett 2i2</SelectItem>
-                            <SelectItem value="built-in-speakers">Built-in Speakers</SelectItem>
-                            <SelectItem value="headphones">Headphones</SelectItem>
+                            {availableOutputDevices.map((device) => (
+                              <SelectItem key={device} value={device}>
+                                {device}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>

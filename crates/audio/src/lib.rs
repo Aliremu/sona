@@ -199,6 +199,7 @@ pub struct AudioEngine {
 
     // Cache input and output devices on startup since for certain drivers like ASIO, selecting a
     // device removes all other devices.
+    pub cached_host_ids: Vec<HostId>,
     pub cached_input_devices: FxHashMap<HostId, Vec<String>>,
     pub cached_output_devices: FxHashMap<HostId, Vec<String>>,
 }
@@ -208,6 +209,7 @@ impl Default for AudioEngine {
         // https://github.com/RustAudio/cpal/issues/884
         // https://github.com/RustAudio/cpal/issues/657
 
+        let mut cached_host_ids = Vec::new();   
         let mut cached_input_devices = FxHashMap::default();
         let mut cached_output_devices = FxHashMap::default();
 
@@ -216,6 +218,8 @@ impl Default for AudioEngine {
                 warn!("Failed to get host from id: {:?}", id.name());
                 return;
             };
+
+            cached_host_ids.push(id.clone());
 
             let Ok(input_devices) = host.input_devices() else {
                 warn!("Failed to get input devices for host {:?}!", id.name());
@@ -333,11 +337,18 @@ impl Default for AudioEngine {
 
             plugin_modules,
 
+            cached_host_ids,
             cached_input_devices,
             cached_output_devices,
         }
     }
 }
+
+// SAFETY: AudioEngine uses UnsafeCell for audio processing, but the design ensures
+// that these are only accessed from the audio thread in a controlled manner.
+// The Arc<UnsafeCell<_>> pattern is safe when properly synchronized.
+unsafe impl Send for AudioEngine {}
+unsafe impl Sync for AudioEngine {}
 
 impl AudioEngine {
     pub fn run(&mut self) {
@@ -377,13 +388,13 @@ impl AudioEngine {
             .input_device
             .build_input_stream(
                 &self.input_config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                move |data: &[i32], _: &cpal::InputCallbackInfo| {
                     // perf::begin_perf!("audio_input_stream");
                     let block_size = data.len() / channels;
 
                     for (i, frame) in data.chunks(channels).enumerate() {
                         for j in 0..channels {
-                            input_data.write(j, i, frame[j] as f32 / f32::MAX as f32);
+                            input_data.write(j, i, frame[j] as f32 / i32::MAX as f32);
                         }
                     }
 
@@ -427,15 +438,15 @@ impl AudioEngine {
             .output_device
             .build_output_stream(
                 &self.output_config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                move |data: &mut [i32], _: &cpal::OutputCallbackInfo| {
                     for sample in data {
                         *sample = match consumer.try_pop() {
                             Some(s) => {
-                                let scaled = s * f32::MAX as f32;
+                                let scaled = s * i32::MAX as f32;
                                 // Clamp the value to ensure it stays within the valid i32 range
-                                scaled.round().clamp(f32::MIN as f32, f32::MAX as f32) as f32
+                                scaled.round().clamp(i32::MIN as f32, i32::MAX as f32) as i32
                             }
-                            None => 0f32,
+                            None => 0i32,
                         };
                     }
                 },

@@ -18,11 +18,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
 
 audio.workspace = true
+vst3.workspace = true
 
+log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing-subscriber.workspace = true
