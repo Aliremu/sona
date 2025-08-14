@@ -14,6 +14,7 @@ use log::warn;
 use std::error::Error;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::sync::Weak;
 
 pub mod base;
 pub mod gui;
@@ -38,6 +39,10 @@ impl<T: FUnknown_Impl> VSTPtr<T> {
             data: ptr,
             _marker: PhantomData,
         }
+    }
+
+    pub fn as_weak(&self) -> Weak<T> {
+        unsafe { Weak::from_raw(self.data) }
     }
 }
 

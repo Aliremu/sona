@@ -88,9 +88,7 @@ impl<T: Copy + Clone, const CHANNELS: usize, const BUFFER_SIZE: usize>
 impl<T: Copy + Clone, const CHANNELS: usize, const BUFFER_SIZE: usize> Drop
     for Sync2DArray<T, CHANNELS, BUFFER_SIZE>
 {
-    fn drop(&mut self) {
-        warn!("Dropping Sync2DArray!");
-    }
+    fn drop(&mut self) {}
 }
 
 /// Selects the best audio format from available configurations
@@ -458,8 +456,21 @@ impl AudioEngine {
         self.host = cpal::host_from_id(host_id)?;
 
         // Reset devices and configs
+        // https://stackoverflow.com/questions/78319116/no-audio-input-via-asio-with-feedback-example-using-cpal
+        // Since ASIO expects input/output to be exclusive, they need to be the same device.
         self.input_device = self.host.default_input_device();
-        self.output_device = self.host.default_output_device();
+        #[cfg(target_os = "windows")]
+        if self.host.id() == cpal::HostId::Asio {
+            self.output_device = self.input_device.clone();
+        } else {
+            self.output_device = self.host.default_output_device();
+        }
+
+        #[cfg(target_os = "macos")]
+        if self.host.id() == cpal::HostId::CoreAudio {
+            self.input_device = self.output_device.clone();
+            self.input_config = self.output_config.clone();
+        }
 
         // Update configs if devices are available
         if let Some(ref device) = self.input_device {
@@ -471,6 +482,7 @@ impl AudioEngine {
 
         // Update current settings
         self.update_current_settings();
+        self.update_process_data();
 
         info!("Selected host: {}", host_name);
         Ok(())
@@ -502,6 +514,7 @@ impl AudioEngine {
         }
 
         self.update_current_settings();
+        self.update_process_data();
         info!("Selected input device: {}", device_name);
         Ok(())
     }
@@ -532,6 +545,7 @@ impl AudioEngine {
         }
 
         self.update_current_settings();
+        self.update_process_data();
         info!("Selected output device: {}", device_name);
         Ok(())
     }
@@ -548,6 +562,9 @@ impl AudioEngine {
             config.sample_rate = cpal::SampleRate(sample_rate);
         }
 
+        // Update ProcessData to reflect any changes
+        self.update_process_data();
+
         info!("Set sample rate to: {}", sample_rate);
         Ok(())
     }
@@ -563,6 +580,9 @@ impl AudioEngine {
         if let Some(ref mut config) = self.output_config {
             config.buffer_size = cpal::BufferSize::Fixed(buffer_size);
         }
+
+        // Update ProcessData to reflect the new buffer size
+        self.update_process_data();
 
         info!("Set buffer size to: {}", buffer_size);
         Ok(())
@@ -591,6 +611,28 @@ impl AudioEngine {
                 self.current_buffer_size = size;
             }
         }
+    }
+
+    /// Internal helper to update ProcessData with current audio settings
+    fn update_process_data(&mut self) {
+        // Since ProcessData is Arc<ProcessData>, we can't modify it directly.
+        // We need to create a new ProcessData and replace the Arc.
+        let new_process_data = Arc::new(ProcessData {
+            process_mode: ProcessMode::Realtime,
+            symbolic_sample_size: SymbolicSampleSize::Sample32,
+            num_samples: self.current_buffer_size as i32,
+            num_inputs: 1,
+            num_outputs: 1,
+            inputs: self.in_bus.get(),
+            outputs: self.out_bus.get(),
+            input_parameter_changes: self.input_params.get() as *mut _,
+            output_parameter_changes: std::ptr::null_mut(),
+            input_events: std::ptr::null_mut(),
+            output_events: std::ptr::null_mut(),
+            process_context: std::ptr::null_mut(),
+        });
+        
+        self.process_data = new_process_data;
     }
 
     /// Start audio processing
@@ -668,9 +710,11 @@ impl AudioEngine {
 
                 for i in 0..block_size {
                     resampled_data.as_ref().iter().for_each(|v| {
-                        if let Some(sample) = v.get(i) {
-                            let _ = producer.try_push(*sample);
-                        }
+                        let Some(sample) = v.get(i) else {
+                            return;
+                        };
+
+                        let _ = producer.try_push(*sample);
                     });
                 }
             },

@@ -23,13 +23,13 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [pluginDirectory, setPluginDirectory] = useState("/Users/username/Audio/Plug-Ins/VST3")
 
   const [availableHosts, setAvailableHosts] = useState<string[]>([])
-  const [audioDriver, setAudioDriver] = useState("asio")
+  const [audioDriver, setAudioDriver] = useState("")
 
   const [availableInputDevices, setAvailableInputDevices] = useState<string[]>([])
-  const [inputDevice, setInputDevice] = useState("focusrite-scarlett")
+  const [inputDevice, setInputDevice] = useState("")
 
   const [availableOutputDevices, setAvailableOutputDevices] = useState<string[]>([])
-  const [outputDevice, setOutputDevice] = useState("focusrite-scarlett")
+  const [outputDevice, setOutputDevice] = useState("")
 
   const [sampleRate, setSampleRate] = useState("44100")
   const [bufferSize, setBufferSize] = useState("256")
@@ -38,19 +38,67 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [enableLowLatency, setEnableLowLatency] = useState(true)
   const [enableMetronome, setEnableMetronome] = useState(false)
 
-  useMemo(async () => {
-    const inputDevices: string[] = await invoke('get_input_devices');
-    setAvailableInputDevices(inputDevices);
+  useEffect(() => {
+    async function run() {
+      const response = await invoke('select_host', { host: audioDriver });
 
-    const outputDevices: string[] = await invoke('get_output_devices');
-    setAvailableOutputDevices(outputDevices);
-  }, [setAudioDriver]);
+      const inputDevices: string[] = await invoke('get_input_devices');
+      setAvailableInputDevices(inputDevices);
 
-  useMemo(() => {
-    invoke('get_hosts').then((hosts) => {
-        setAvailableHosts(hosts as string[]);
-    });
+      const outputDevices: string[] = await invoke('get_output_devices');
+      setAvailableOutputDevices(outputDevices);
+
+      setInputDevice(await invoke('get_input_device'));
+      setOutputDevice(await invoke('get_output_device'));
+
+      const size = (await invoke('get_buffer_size') as number).toString();
+      console.log("Fetched buffer size:", size);
+      setBufferSize(size);
+
+      console.log("Selected audio driver:", response);
+      console.log("Set input device:", inputDevice);
+      console.log("Set output device:", outputDevice);
+    }
+
+    run();
+  }, [audioDriver]);
+
+  useEffect(() => {
+    async function run() {
+      const response = await invoke('select_input', { inputDevice: inputDevice });
+      console.log("Selected input device:", response);
+    }
+
+    run();
+  }, [inputDevice]);
+
+  useEffect(() => {
+    async function run() {
+      const response = await invoke('select_output', { outputDevice: outputDevice });
+      console.log("Selected output device:", response);
+    }
+
+    run();
+  }, [outputDevice]);
+
+  useEffect(() => {
+    async function run() {
+      const hosts = await invoke('get_hosts');
+      setAvailableHosts(hosts as string[]);
+      setAudioDriver(await invoke('get_host') as string);
+    }
+
+    run();
   }, []);
+
+  useEffect(() => {
+    async function run() {
+      const response = await invoke('set_buffer_size', { size: parseInt(bufferSize) });
+      console.log("Set buffer size:", response);
+    }
+
+    run();
+  }, [bufferSize]);
 
   const tabs = [
     { id: "audio", label: "Audio", icon: Volume2 },
@@ -195,6 +243,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                           <SelectContent>
                             <SelectItem value="64">64 samples</SelectItem>
                             <SelectItem value="128">128 samples</SelectItem>
+                            <SelectItem value="192">192 samples</SelectItem>
                             <SelectItem value="256">256 samples</SelectItem>
                             <SelectItem value="512">512 samples</SelectItem>
                             <SelectItem value="1024">1024 samples</SelectItem>

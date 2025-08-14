@@ -1,11 +1,15 @@
 use audio::AudioEngine;
-use tauri::{Manager, PhysicalSize};
-use tracing_subscriber::{fmt::time::LocalTime};
+use log::info;
+use serde_json::json;
+use tauri_plugin_store::StoreExt;
+use std::ffi::c_void;
+use std::{ffi::CStr, sync::Mutex};
+use tauri::{Manager, PhysicalSize, RunEvent};
+use tauri_plugin_store::JsonValue;
+use tracing_subscriber::fmt::time::LocalTime;
 use vst3::base::funknown::IComponent_Impl;
 use vst3::{base::funknown::IPlugView_Impl, gui::plug_view::PlatformType};
 use vst3::{base::funknown::IPluginFactory_Impl, gui::plug_view::ViewRect};
-use std::ffi::c_void;
-use std::{ffi::CStr, sync::Mutex};
 
 mod commands;
 
@@ -18,15 +22,18 @@ async fn create_vst_window(app: tauri::AppHandle) -> Result<String, String> {
         .decorations(true)
         .build()
         .map_err(|e| e.to_string())?;
-    
+
     // Get the native window handle for embedding VST UIs
     #[cfg(target_os = "windows")]
     let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
-    
+
     #[cfg(not(target_os = "windows"))]
     let hwnd = 0;
-    
-    Ok(format!("Created VST window with handle: {:p}", hwnd as *const c_void))
+
+    Ok(format!(
+        "Created VST window with handle: {:p}",
+        hwnd as *const c_void
+    ))
 }
 
 #[tauri::command]
@@ -42,8 +49,8 @@ type GlobalAudio = Mutex<AudioEngine>;
 fn open_plugin(manager: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let audio_state = manager.state::<GlobalAudio>();
     let mut engine = audio_state.lock().unwrap();
-    engine.run();
-    
+    // engine.run();
+
     let window = tauri::WindowBuilder::new(manager, "VST").build()?;
     let hwnd = window.hwnd()?.0;
 
@@ -69,13 +76,20 @@ fn open_plugin(manager: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Err
 
         let mut rect = ViewRect::default();
         view.check_size_constraint(&mut rect);
-
         let _ = window.set_size(PhysicalSize::new(rect.right, rect.bottom));
+
+        window.clone().on_window_event(move |event| {
+            if let tauri::WindowEvent::Resized(size) = event {
+                let mut rect = ViewRect::default();
+                view.check_size_constraint(&mut rect);
+
+                let _ = window.set_size(PhysicalSize::new(rect.right, rect.bottom));
+            }
+        });
     }
-    
+
     Ok(())
 }
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -85,14 +99,59 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![commands::get_input_devices, commands::get_output_devices, commands::get_hosts, create_vst_window, open_plugin_editor])
+        .invoke_handler(tauri::generate_handler![
+            commands::get_hosts,
+            commands::get_input_devices,
+            commands::get_output_devices,
+            commands::get_host,
+            commands::get_input_device,
+            commands::get_output_device,
+            commands::get_buffer_size,
+            commands::select_host,
+            commands::select_input,
+            commands::select_output,
+            commands::set_buffer_size,
+            create_vst_window,
+            open_plugin_editor
+        ])
         .setup(|app| {
-            app.manage(Mutex::new(AudioEngine::default()));
-            let _ = open_plugin(&app.handle());
+            let store = app.store(".settings.json").unwrap();
+            let mut engine = AudioEngine::default();
+
+            let _ = store.get("audio-settings").and_then(|v| v.as_object().map(|obj| {
+                obj.get("host").and_then(|v| v.as_str()).map(|s| engine.select_host(s).ok());
+                obj.get("input").and_then(|v| v.as_str()).map(|s| engine.select_input(s).ok());
+                obj.get("output").and_then(|v| v.as_str()).map(|s| engine.select_output(s).ok());
+                obj.get("buffer_size").and_then(|v| v.as_u64()).map(|v| engine.set_buffer_size(v as u32).ok());
+            }));
+
+            app.manage(Mutex::new(engine));
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(move |app, event| {
+            match &event {
+                RunEvent::ExitRequested { code, api, .. } => {
+                    info!("Goodbye...");
+                    let audio_state = app.state::<GlobalAudio>();
+                    let engine = audio_state.lock().unwrap();
+                    let store = app.store(".settings.json").unwrap();
+                    store.set("audio-settings", json!({
+                        "host": engine.host_name(),
+                        "input": engine.input_device_name(),
+                        "output": engine.output_device_name(),
+                        "buffer_size": engine.buffer_size()
+                    }));
+
+                    store.save().unwrap();
+                    store.close_resource();
+                },
+
+                _ => {}
+            };
+        });
 }
