@@ -205,3 +205,26 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<String>, String>
 
     registry.scan_plugins()
 }
+
+#[tauri::command]
+pub fn get_cpu_usage() -> Result<f32, String> {
+    use sysinfo::{System};
+    
+    let mut system = System::new_all();
+    system.refresh_cpu(); // Refresh CPU information.
+    
+    // Wait a bit because CPU usage is calculated over time
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    system.refresh_cpu();
+    
+    // Calculate average CPU usage across all cores
+    let cpus = system.cpus();
+    if cpus.is_empty() {
+        return Err("No CPU information available".to_string());
+    }
+    
+    let total_usage: f32 = cpus.iter().map(|cpu| cpu.cpu_usage()).sum();
+    let average_usage = total_usage / cpus.len() as f32;
+    
+    Ok(average_usage)
+}

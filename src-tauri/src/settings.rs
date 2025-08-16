@@ -23,6 +23,13 @@ pub fn create_plugin_registry_from_settings(app: &tauri::AppHandle) -> PluginReg
     let store = app.store(".settings.json").unwrap();
     let mut registry = PluginRegistry::new();
 
+    let default_plugin_paths = vec![
+        app.path().local_data_dir().unwrap().join("Programs/Common/VST3").to_string_lossy().into_owned(),
+        "/Program Files/Common Files/VST3".to_string(),
+        "/Program Files (x86)/Common Files/VST3".to_string(),
+        app.path().app_local_data_dir().unwrap().join("/VST3").to_string_lossy().into_owned(),
+    ];
+
     let paths: Vec<String> = match store.get("plugin-paths") {
         Some(val) => {
             if let Some(arr) = val.as_array() {
@@ -30,21 +37,10 @@ pub fn create_plugin_registry_from_settings(app: &tauri::AppHandle) -> PluginReg
                     .filter_map(|v| v.as_str().map(|s| s.to_owned()))
                     .collect()
             } else {
-                vec![
-                    app.path().local_data_dir().unwrap().join("Programs/Common/VST3").to_string_lossy().into_owned(),
-                    "/Program Files/Common Files/VST3".to_string(),
-                    "/Program Files (x86)/Common Files/VST3".to_string(),
-                    app.path().app_local_data_dir().unwrap().join("/VST3").to_string_lossy().into_owned(),
-                ]
+                default_plugin_paths
             }
         },
-        None => vec![
-                    app.path().local_data_dir().unwrap().join("Programs/Common/VST3").to_string_lossy().into_owned(),
-                    "/Program Files/Common Files/VST3".to_string(),
-                    "/Program Files (x86)/Common Files/VST3".to_string(),
-                    app.path().app_local_data_dir().unwrap().join("/VST3").to_string_lossy().into_owned(),
-                    "C:\\Coding\\Projects\\lyre\\plugins".to_string()
-                ]
+        None => default_plugin_paths
     };
 
     registry.set_plugin_paths(paths);

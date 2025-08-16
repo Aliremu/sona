@@ -25,6 +25,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [pluginDirectories, setPluginDirectories] = useState<string[]>([])
   const [newPluginDirectory, setNewPluginDirectory] = useState("")
   const [discoveredPlugins, setDiscoveredPlugins] = useState<string[]>([])
+  const [cpuUsage, setCpuUsage] = useState<number>(0)
 
   const [availableHosts, setAvailableHosts] = useState<string[]>([])
   const [audioDriver, setAudioDriver] = useState("")
@@ -87,20 +88,44 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     }
   }, [open])
 
+  // Update CPU usage periodically when plugins tab is active
+  useEffect(() => {
+    if (!open || activeTab !== "plugins") return
+
+    const updateCpuUsage = async () => {
+      try {
+        const usage: number = await invoke('get_cpu_usage')
+        setCpuUsage(Math.round(usage))
+      } catch (error) {
+        console.error('Failed to get CPU usage:', error)
+      }
+    }
+
+    // Update immediately
+    updateCpuUsage()
+
+    // Then update every 2 seconds
+    const interval = setInterval(updateCpuUsage, 2000)
+
+    return () => clearInterval(interval)
+  }, [open, activeTab])
+
   // Save plugin paths when they change
   const savePluginPaths = async (paths: string[]) => {
     try {
       await invoke('set_plugin_paths', { paths })
       console.log('Plugin paths saved:', paths)
       toast.success('Plugin directories updated successfully')
+      return true
     } catch (error) {
       console.error('Failed to save plugin paths:', error)
       toast.error(typeof error === 'string' ? error : 'Failed to update plugin directories')
+      return false
     }
   }
 
   // Add a new plugin directory
-  const addPluginDirectory = () => {
+  const addPluginDirectory = async () => {
     const trimmedPath = newPluginDirectory.trim()
     if (!trimmedPath) {
       toast.error('Please enter a directory path')
@@ -113,16 +138,28 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
     }
     
     const updatedPaths = [...pluginDirectories, trimmedPath]
-    setPluginDirectories(updatedPaths)
-    savePluginPaths(updatedPaths)
-    setNewPluginDirectory("")
+    
+    // Try to save to backend first
+    const success = await savePluginPaths(updatedPaths)
+    
+    // Only update frontend state if backend save was successful
+    if (success) {
+      setPluginDirectories(updatedPaths)
+      setNewPluginDirectory("")
+    }
   }
 
   // Remove a plugin directory
-  const removePluginDirectory = (index: number) => {
+  const removePluginDirectory = async (index: number) => {
     const updatedPaths = pluginDirectories.filter((_, i) => i !== index)
-    setPluginDirectories(updatedPaths)
-    savePluginPaths(updatedPaths)
+    
+    // Try to save to backend first
+    const success = await savePluginPaths(updatedPaths)
+    
+    // Only update frontend state if backend save was successful
+    if (success) {
+      setPluginDirectories(updatedPaths)
+    }
   }
 
   const scanPlugins = () => {
@@ -597,7 +634,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="p-3 rounded-lg border bg-card">
                           <div className="text-sm font-medium">CPU Usage</div>
-                          <div className="text-2xl font-bold text-accent">23%</div>
+                          <div className="text-2xl font-bold text-accent">{cpuUsage}%</div>
                           <div className="text-xs text-muted-foreground">Current load</div>
                         </div>
                         <div className="p-3 rounded-lg border bg-card">

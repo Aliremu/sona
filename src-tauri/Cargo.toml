@@ -31,3 +31,4 @@ serde.workspace = true
 serde_json.workspace = true
 tracing-subscriber.workspace = true
 tauri-plugin-store = "2"
+sysinfo = "0.30"

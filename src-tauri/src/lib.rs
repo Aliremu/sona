@@ -125,6 +125,7 @@ pub fn run() {
             commands::get_discovered_plugins,
             commands::browse_directory,
             commands::scan_plugins,
+            commands::get_cpu_usage,
             create_vst_window,
             open_plugin_editor
         ])
