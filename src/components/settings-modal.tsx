@@ -9,8 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Settings, Folder, Volume2, Mic, Headphones, Sliders, Palette } from "lucide-react"
+import { Settings, Folder, Volume2, Mic, Headphones, Sliders, Palette, Plus, Trash2 } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
+import { toast } from "sonner"
 
 interface SettingsModalProps {
   open: boolean
@@ -20,7 +22,9 @@ interface SettingsModalProps {
 export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const { theme, setTheme } = useTheme()
   const [activeTab, setActiveTab] = useState("audio")
-  const [pluginDirectory, setPluginDirectory] = useState("/Users/username/Audio/Plug-Ins/VST3")
+  const [pluginDirectories, setPluginDirectories] = useState<string[]>([])
+  const [newPluginDirectory, setNewPluginDirectory] = useState("")
+  const [discoveredPlugins, setDiscoveredPlugins] = useState<string[]>([])
 
   const [availableHosts, setAvailableHosts] = useState<string[]>([])
   const [audioDriver, setAudioDriver] = useState("")
@@ -37,6 +41,111 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
   const [outputGain, setOutputGain] = useState(80)
   const [enableLowLatency, setEnableLowLatency] = useState(true)
   const [enableMetronome, setEnableMetronome] = useState(false)
+
+  // Load plugin paths on component mount
+  useEffect(() => {
+    async function loadPluginData() {
+      try {
+        const paths: string[] = await invoke('get_plugin_paths')
+        setPluginDirectories(paths)
+        
+        const plugins: string[] = await invoke('get_discovered_plugins')
+        setDiscoveredPlugins(plugins)
+      } catch (error) {
+        console.error('Failed to load plugin data:', error)
+      }
+    }
+    
+    if (open) {
+      loadPluginData()
+    }
+  }, [open])
+
+  // Set up event listeners for directory selection
+  useEffect(() => {
+    if (!open) return
+
+    let unlistenSelected: (() => void) | undefined
+    let unlistenCancelled: (() => void) | undefined
+
+    async function setupListeners() {
+      unlistenSelected = await listen<string>('directory-selected', (event) => {
+        setNewPluginDirectory(event.payload)
+      })
+
+      unlistenCancelled = await listen('directory-cancelled', () => {
+        // User cancelled, no action needed
+        console.log('Directory selection cancelled')
+      })
+    }
+
+    setupListeners()
+
+    return () => {
+      unlistenSelected?.()
+      unlistenCancelled?.()
+    }
+  }, [open])
+
+  // Save plugin paths when they change
+  const savePluginPaths = async (paths: string[]) => {
+    try {
+      await invoke('set_plugin_paths', { paths })
+      console.log('Plugin paths saved:', paths)
+      toast.success('Plugin directories updated successfully')
+    } catch (error) {
+      console.error('Failed to save plugin paths:', error)
+      toast.error(typeof error === 'string' ? error : 'Failed to update plugin directories')
+    }
+  }
+
+  // Add a new plugin directory
+  const addPluginDirectory = () => {
+    const trimmedPath = newPluginDirectory.trim()
+    if (!trimmedPath) {
+      toast.error('Please enter a directory path')
+      return
+    }
+    
+    if (pluginDirectories.includes(trimmedPath)) {
+      toast.error('Directory already exists in the list')
+      return
+    }
+    
+    const updatedPaths = [...pluginDirectories, trimmedPath]
+    setPluginDirectories(updatedPaths)
+    savePluginPaths(updatedPaths)
+    setNewPluginDirectory("")
+  }
+
+  // Remove a plugin directory
+  const removePluginDirectory = (index: number) => {
+    const updatedPaths = pluginDirectories.filter((_, i) => i !== index)
+    setPluginDirectories(updatedPaths)
+    savePluginPaths(updatedPaths)
+  }
+
+  const scanPlugins = () => {
+    invoke('scan_plugins')
+      .then((plugins) => {
+        setDiscoveredPlugins(plugins as string[])
+      })
+      .catch((error) => {
+        console.error('Failed to scan plugins:', error)
+        toast.error('Failed to scan plugins')
+      })
+  }
+
+  // Browse for directory
+  const browseDirectory = async () => {
+    try {
+      await invoke('browse_directory')
+      // The result will come through the event listener
+    } catch (error) {
+      console.error('Failed to browse directory:', error)
+      toast.error('Failed to open directory browser')
+    }
+  }
 
   useEffect(() => {
     async function run() {
@@ -311,34 +420,85 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
 
                 {activeTab === "plugins" && (
                   <div className="space-y-6">
-                    {/* Plugin Directory */}
+                    {/* Plugin Directories */}
                     <div className="space-y-3">
                       <Label className="text-sm font-medium flex items-center gap-2">
                         <Folder className="h-4 w-4 text-accent" />
-                        VST Plugin Directory
+                        VST Plugin Directories
                       </Label>
+                      
+                      {/* Add new directory */}
                       <div className="flex gap-2">
                         <Input
-                          value={pluginDirectory}
-                          onChange={(e) => setPluginDirectory(e.target.value)}
+                          value={newPluginDirectory}
+                          onChange={(e) => setNewPluginDirectory(e.target.value)}
                           placeholder="/path/to/vst/plugins"
                           className="focus:ring-accent focus:border-accent"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              addPluginDirectory()
+                            }
+                          }}
                         />
                         <Button
                           variant="outline"
-                          className="hover:bg-muted hover:text-foreground border-border bg-transparent"
+                          onClick={addPluginDirectory}
+                          disabled={!newPluginDirectory.trim() || pluginDirectories.includes(newPluginDirectory.trim())}
+                          className="hover:bg-muted hover:text-foreground border-border bg-transparent flex-shrink-0"
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Add
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={browseDirectory}
+                          className="hover:bg-muted hover:text-foreground border-border bg-transparent flex-shrink-0"
                         >
                           Browse
                         </Button>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Specify the directory where your VST plugins are installed
-                      </p>
+
+                      {/* Current directories list in scrollable viewport */}
+                      <div className="border rounded-lg bg-card">
+                        <div className="p-3 border-b bg-muted/30">
+                          <div className="text-sm font-medium">Configured Directories ({pluginDirectories.length})</div>
+                          <div className="text-xs text-muted-foreground">
+                            Add directories where your VST plugins are installed
+                          </div>
+                        </div>
+                        <ScrollArea className="h-[200px]">
+                          <div className="p-1">
+                            {pluginDirectories.map((directory, index) => (
+                              <div key={index} className="flex items-center gap-3 p-2 hover:bg-muted/50 rounded group">
+                                <Folder className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                <span className="flex-1 text-sm font-mono text-foreground truncate" title={directory}>
+                                  {directory}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removePluginDirectory(index)}
+                                  className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-opacity"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                            
+                            {pluginDirectories.length === 0 && (
+                              <div className="text-sm text-muted-foreground text-center py-8">
+                                No plugin directories configured
+                                <div className="text-xs mt-1">Add a directory above to get started</div>
+                              </div>
+                            )}
+                          </div>
+                        </ScrollArea>
+                      </div>
                     </div>
 
                     <Separator />
 
-                    {/* Plugin Scan */}
+                    {/* Plugin Management */}
                     <div className="space-y-3">
                       <Label className="text-sm font-medium flex items-center gap-2">
                         <div className="h-2 w-2 rounded-full bg-accent" />
@@ -348,6 +508,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         <Button
                           variant="outline"
                           className="hover:bg-muted hover:text-foreground border-border bg-transparent"
+                          onClick={() => scanPlugins()}
                         >
                           Scan for Plugins
                         </Button>
@@ -358,9 +519,40 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                           Reset Plugin Cache
                         </Button>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Scan for new plugins or reset the plugin cache if you're experiencing issues
-                      </p>
+
+                      {/* Discovered Plugins List */}
+                      <div className="border rounded-lg bg-card">
+                        <div className="p-3 border-b bg-muted/30">
+                          <div className="text-sm font-medium">Discovered Plugins</div>
+                          <div className="text-xs text-muted-foreground">
+                            Plugins found in configured directories
+                          </div>
+                        </div>
+                        <ScrollArea className="h-[150px]">
+                          <div className="p-1">
+                            {discoveredPlugins.map((plugin, index) => (
+                              <div key={index} className="flex items-center gap-3 p-2 hover:bg-muted/50 rounded">
+                                <Sliders className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                <span className="flex-1 text-sm text-foreground truncate" title={plugin}>
+                                  {plugin}
+                                </span>
+                              </div>
+                            ))}
+                            
+                            {discoveredPlugins.length === 0 && (
+                              <div className="text-sm text-muted-foreground text-center py-6">
+                                No plugins discovered
+                                <div className="text-xs mt-1">Add plugin directories and scan for plugins</div>
+                              </div>
+                            )}
+                          </div>
+                        </ScrollArea>
+                        <div className="p-2 border-t bg-muted/10 text-center">
+                          <div className="text-xs text-muted-foreground">
+                            {discoveredPlugins.length} plugin{discoveredPlugins.length !== 1 ? 's' : ''} found
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <Separator />
@@ -409,9 +601,9 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                           <div className="text-xs text-muted-foreground">Current load</div>
                         </div>
                         <div className="p-3 rounded-lg border bg-card">
-                          <div className="text-sm font-medium">Active Plugins</div>
-                          <div className="text-2xl font-bold text-accent">4</div>
-                          <div className="text-xs text-muted-foreground">Currently loaded</div>
+                          <div className="text-sm font-medium">Discovered Plugins</div>
+                          <div className="text-2xl font-bold text-accent">{discoveredPlugins.length}</div>
+                          <div className="text-xs text-muted-foreground">Total found</div>
                         </div>
                       </div>
                     </div>

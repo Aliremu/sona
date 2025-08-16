@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
+tauri-plugin-dialog = "2"
 
 audio.workspace = true
 vst3.workspace = true

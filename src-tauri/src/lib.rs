@@ -11,7 +11,11 @@ use vst3::base::funknown::IComponent_Impl;
 use vst3::{base::funknown::IPlugView_Impl, gui::plug_view::PlatformType};
 use vst3::{base::funknown::IPluginFactory_Impl, gui::plug_view::ViewRect};
 
+use crate::plugins::PluginRegistry;
+
 mod commands;
+mod plugins;
+mod settings;
 
 #[tauri::command]
 async fn create_vst_window(app: tauri::AppHandle) -> Result<String, String> {
@@ -45,6 +49,7 @@ async fn open_plugin_editor(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 type GlobalAudio = Mutex<AudioEngine>;
+type GlobalPluginRegistry = Mutex<PluginRegistry>;
 
 fn open_plugin(manager: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let audio_state = manager.state::<GlobalAudio>();
@@ -102,6 +107,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_hosts,
             commands::get_input_devices,
@@ -114,21 +120,18 @@ pub fn run() {
             commands::select_input,
             commands::select_output,
             commands::set_buffer_size,
+            commands::get_plugin_paths,
+            commands::set_plugin_paths,
+            commands::get_discovered_plugins,
+            commands::browse_directory,
+            commands::scan_plugins,
             create_vst_window,
             open_plugin_editor
         ])
         .setup(|app| {
-            let store = app.store(".settings.json").unwrap();
-            let mut engine = AudioEngine::default();
+            app.manage(Mutex::new(settings::create_audio_engine_from_settings(app.app_handle())));
+            app.manage(Mutex::new(settings::create_plugin_registry_from_settings(app.app_handle())));
 
-            let _ = store.get("audio-settings").and_then(|v| v.as_object().map(|obj| {
-                obj.get("host").and_then(|v| v.as_str()).map(|s| engine.select_host(s).ok());
-                obj.get("input").and_then(|v| v.as_str()).map(|s| engine.select_input(s).ok());
-                obj.get("output").and_then(|v| v.as_str()).map(|s| engine.select_output(s).ok());
-                obj.get("buffer_size").and_then(|v| v.as_u64()).map(|v| engine.set_buffer_size(v as u32).ok());
-            }));
-
-            app.manage(Mutex::new(engine));
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -139,6 +142,8 @@ pub fn run() {
                     info!("Goodbye...");
                     let audio_state = app.state::<GlobalAudio>();
                     let engine = audio_state.lock().unwrap();
+                    let plugin_registry = app.state::<GlobalPluginRegistry>();
+
                     let store = app.store(".settings.json").unwrap();
                     store.set("audio-settings", json!({
                         "host": engine.host_name(),
@@ -146,6 +151,8 @@ pub fn run() {
                         "output": engine.output_device_name(),
                         "buffer_size": engine.buffer_size()
                     }));
+
+                    store.set("plugin-paths", plugin_registry.lock().unwrap().get_plugin_paths());
 
                     store.save().unwrap();
                     store.close_resource();

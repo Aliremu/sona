@@ -10,11 +10,13 @@ import {
 } from "@/components/ui/menubar"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { platform } from "@tauri-apps/plugin-os"
+import { Minus, Square, Copy, X } from "lucide-react"
 
 export function Titlebar({
   children
 }: React.ComponentProps<"div">) {
   const [isMacOS, setIsMacOS] = React.useState(false);
+  const [isMaximized, setIsMaximized] = React.useState(false);
 
   React.useEffect(() => {
     const currentPlatform = platform();
@@ -24,6 +26,15 @@ export function Titlebar({
   React.useEffect(() => {
     const appWindow = getCurrentWindow();
 
+    // Check initial maximized state
+    appWindow.isMaximized().then(setIsMaximized);
+
+    // Listen for window resize events
+    const unlisten = appWindow.listen('tauri://resize', async () => {
+      const maximized = await appWindow.isMaximized();
+      setIsMaximized(maximized);
+    });
+
     document
       .getElementById('titlebar-minimize')
       ?.addEventListener('click', () => {
@@ -31,11 +42,19 @@ export function Titlebar({
       });
     document
       .getElementById('titlebar-maximize')
-      ?.addEventListener('click', () => appWindow.toggleMaximize());
+      ?.addEventListener('click', async () => {
+        await appWindow.toggleMaximize();
+        const maximized = await appWindow.isMaximized();
+        setIsMaximized(maximized);
+      });
     document
       .getElementById('titlebar-close')
       ?.addEventListener('click', () => appWindow.close());
-  });
+
+    return () => {
+      unlisten.then(f => f());
+    };
+  }, []);
 
 
 
@@ -74,18 +93,15 @@ export function Titlebar({
           </Menubar>
           <div className="flex-1 h-full" data-tauri-drag-region></div>
           <div className="flex items-center gap-2 h-full">
-            <button id="titlebar-minimize" className="hover:bg-gray-200 px-2 h-full transition-[background-color] duration-100 ease-linear"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-              <path fill="currentColor" d="M19 13H5v-2h14z" />
-            </svg></button>
-            <button id="titlebar-maximize" className="hover:bg-gray-200 px-2 h-full transition-[background-color] duration-100 ease-linear"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-              <path fill="currentColor" d="M4 4h16v16H4zm2 4v10h12V8z" />
-            </svg></button>
-            <button id="titlebar-close" className="hover:bg-red-500 hover:text-white px-2 h-full transition-[background-color] duration-100 ease-linear"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-              <path
-                fill="currentColor"
-                d="M13.46 12L19 17.54V19h-1.46L12 13.46L6.46 19H5v-1.46L10.54 12L5 6.46V5h1.46L12 10.54L17.54 5H19v1.46z"
-              />
-            </svg></button>
+            <button id="titlebar-minimize" className="hover:bg-gray-200 px-2 h-full transition-[background-color] duration-100 ease-linear">
+              <Minus size={14} />
+            </button>
+            <button id="titlebar-maximize" className="hover:bg-gray-200 px-2 h-full transition-[background-color] duration-100 ease-linear">
+              {isMaximized ? <Copy size={14} style={{ transform: 'scaleX(-1)' }} /> : <Square size={14} />}
+            </button>
+            <button id="titlebar-close" className="hover:bg-red-500 hover:text-white px-2 h-full transition-[background-color] duration-100 ease-linear">
+              <X size={14} />
+            </button>
           </div>
         </>
       )}

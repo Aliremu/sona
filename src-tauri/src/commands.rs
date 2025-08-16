@@ -3,7 +3,10 @@ use std::{error::Error, fmt, sync::Mutex};
 use audio::AudioEngine;
 use tauri::{ipc::InvokeError, Manager};
 
+use crate::plugins::PluginRegistry;
+
 type GlobalAudio = Mutex<AudioEngine>;
+type GlobalPluginRegistry = Mutex<PluginRegistry>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AudioError {
@@ -141,4 +144,64 @@ pub fn set_buffer_size(app_handle: tauri::AppHandle, size: u32) -> Result<(), Au
         .set_buffer_size(size)
         .and_then(|_| engine.run())
         .map_err(|_| AudioError::HostError)
+}
+
+#[tauri::command]
+pub fn get_plugin_paths(app_handle: tauri::AppHandle) -> Result<Vec<String>, AudioError> {
+    let plugin_registry = app_handle.state::<GlobalPluginRegistry>();
+    let mut registry = plugin_registry.lock().unwrap();
+
+    Ok(registry.get_plugin_paths().to_vec())
+}
+
+#[tauri::command]
+pub fn set_plugin_paths(app_handle: tauri::AppHandle, paths: Vec<String>) -> Result<(), String> {
+    let plugin_registry = app_handle.state::<GlobalPluginRegistry>();
+    let mut registry = plugin_registry.lock().unwrap();
+
+    registry.set_plugin_paths(paths)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn browse_directory(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tauri::Emitter;
+    
+    // Use the dialog with a callback instead of await
+    app_handle.dialog()
+        .file()
+        .set_title("Select VST Plugin Directory")
+        .pick_folder(move |result| {
+            match result {
+                Some(path) => {
+                    // Emit an event with the selected path
+                    let path_str = path.as_path().map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Unknown path".to_string());
+                    let _ = app_handle.emit("directory-selected", path_str);
+                },
+                None => {
+                    // User cancelled, emit a cancelled event
+                    let _ = app_handle.emit("directory-cancelled", ());
+                },
+            }
+        });
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_discovered_plugins(app_handle: tauri::AppHandle) -> Result<Vec<String>, AudioError> {
+    let plugin_registry = app_handle.state::<GlobalPluginRegistry>();
+    let mut registry = plugin_registry.lock().unwrap();
+
+    Ok(registry.get_discovered_plugins().to_vec())
+}
+
+#[tauri::command]
+pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let plugin_registry = app_handle.state::<GlobalPluginRegistry>();
+    let mut registry = plugin_registry.lock().unwrap();
+
+    registry.scan_plugins()
 }
