@@ -34,6 +34,7 @@ use rustc_hash::FxHashMap;
 
 #[derive(Default)]
 pub struct VSTHostContext {
+    pub name: String,
     pub module: Option<Module>,
     pub factory: Option<VSTPtr<IPluginFactory>>,
     pub component: Option<VSTPtr<IComponent>>,
@@ -78,6 +79,8 @@ impl VSTHostContext {
                 if class_info.category() != "Audio Module Class" {
                     continue;
                 }
+
+                ctx.name = class_info.name();
 
                 let comp = factory.create_instance::<IComponent>(class_info.cid)?;
                 comp.set_io_mode(IoMode::Advanced);

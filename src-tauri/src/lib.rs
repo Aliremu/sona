@@ -17,41 +17,10 @@ mod commands;
 mod plugins;
 mod settings;
 
-#[tauri::command]
-async fn create_vst_window(app: tauri::AppHandle) -> Result<String, String> {
-    let window = tauri::WindowBuilder::new(&app, "vst_window")
-        .title("VST Plugin")
-        .inner_size(800.0, 600.0)
-        .resizable(true)
-        .decorations(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    // Get the native window handle for embedding VST UIs
-    #[cfg(target_os = "windows")]
-    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
-
-    #[cfg(not(target_os = "windows"))]
-    let hwnd = 0;
-
-    Ok(format!(
-        "Created VST window with handle: {:p}",
-        hwnd as *const c_void
-    ))
-}
-
-#[tauri::command]
-async fn open_plugin_editor(app: tauri::AppHandle) -> Result<String, String> {
-    match open_plugin(&app) {
-        Ok(_) => Ok("Plugin editor opened successfully".to_string()),
-        Err(e) => Err(format!("Failed to open plugin editor: {}", e)),
-    }
-}
-
 type GlobalAudio = Mutex<AudioEngine>;
 type GlobalPluginRegistry = Mutex<PluginRegistry>;
 
-fn open_plugin(manager: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+fn open_plugin(manager: &tauri::AppHandle, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let audio_state = manager.state::<GlobalAudio>();
     let mut engine = audio_state.lock().unwrap();
     // engine.run();
@@ -60,7 +29,7 @@ fn open_plugin(manager: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Err
     let hwnd = window.hwnd()?.0;
 
     unsafe {
-        engine.add_plugin("C:\\Coding\\Projects\\lyre\\plugins\\Archetype Nolly.vst3");
+        engine.add_plugin(path);
         let modules = engine.plugin_modules();
 
         let plugin = modules.first().expect("Could not get plugin 0!");
@@ -126,12 +95,17 @@ pub fn run() {
             commands::browse_directory,
             commands::scan_plugins,
             commands::get_cpu_usage,
-            create_vst_window,
-            open_plugin_editor
+            commands::get_loaded_plugins
         ])
         .setup(|app| {
             app.manage(Mutex::new(settings::create_audio_engine_from_settings(app.app_handle())));
-            app.manage(Mutex::new(settings::create_plugin_registry_from_settings(app.app_handle())));
+            
+            let plugin_registry = settings::create_plugin_registry_from_settings(app.app_handle());
+
+            for plugin in plugin_registry.get_discovered_plugins() {
+                open_plugin(app.app_handle(), plugin);
+            }
+            app.manage(Mutex::new(plugin_registry));
 
             Ok(())
         })

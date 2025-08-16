@@ -2,6 +2,8 @@
   "name": "sona",
   "private": true,
   "version": "0.1.0",
+  "description": "Professional music practice software with VST support, video playback, and sheet music integration",
+  "author": "William Zhang <williamzhang106@gmail.com>",
   "type": "module",
   "scripts": {
     "dev": "vite",

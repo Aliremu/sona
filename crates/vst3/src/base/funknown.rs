@@ -70,6 +70,13 @@ impl PClassInfo {
             .unwrap()
             .to_string()
     }
+
+    pub unsafe fn name(&self) -> String {
+        CStr::from_ptr(self.name.as_ptr())
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
 }
 
 impl Default for PClassInfo {

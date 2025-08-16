@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useTheme } from "next-themes"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import { PracticeStatsModal } from "@/components/practice-stats-modal"
 import { SettingsModal } from "@/components/settings-modal"
 import { Play, FileMusic, Info, BarChart3, Settings, AudioWaveform, Sun, Moon } from "lucide-react"
 import { Titlebar } from "@/components/title-bar"
+import { invoke } from "@tauri-apps/api/core"
 
 // Sample data structure for playlists
 const initialPlaylists = [
@@ -88,14 +89,7 @@ export default function MusicPracticeApp() {
   const [loopStart, setLoopStart] = useState("")
   const [loopEnd, setLoopEnd] = useState("")
   const [isLooping, setIsLooping] = useState(false)
-  const [plugins, setPlugins] = useState([
-    { id: 1, name: "EQ", enabled: true, type: "EQ", color: "emerald" },
-    { id: 2, name: "Reverb", enabled: true, type: "Reverb", color: "blue" },
-    { id: 3, name: "Compressor", enabled: false, type: "Dynamics", color: "purple" },
-    { id: 4, name: "Delay", enabled: true, type: "Time", color: "orange" },
-    { id: 5, name: "Chorus", enabled: false, type: "Modulation", color: "pink" },
-    { id: 6, name: "Distortion", enabled: true, type: "Drive", color: "red" },
-  ])
+  const [plugins, setPlugins] = useState<{ id: number; name: string; enabled: boolean; type: string; color: string }[]>([])
   const [page, setPage] = useState(1)
   const [playlists, setPlaylists] = useState(initialPlaylists)
   const [currentSong, setCurrentSong] = useState(initialPlaylists[0].songs[0])
@@ -107,6 +101,26 @@ export default function MusicPracticeApp() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("video")
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    async function run() {
+      const response: string[] = await invoke("get_loaded_plugins");
+      let plugins = [];
+      for (const [i, plugin] of response.entries()) {
+        plugins.push({
+          id: i,
+          name: plugin,
+          enabled: true,
+          type: "Reverb",
+          color: "red",
+        });
+      }
+
+      setPlugins(plugins);
+    }
+
+    run();
+  }, [])
 
   const toggleVisualizer = () => setShowVisualizer(!showVisualizer)
 

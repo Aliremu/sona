@@ -13,6 +13,7 @@ import { Settings, Folder, Volume2, Mic, Headphones, Sliders, Palette, Plus, Tra
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { toast } from "sonner"
+import { APP_NAME, APP_VERSION, APP_DESCRIPTION, APP_AUTHOR } from "@/lib/constants"
 
 interface SettingsModalProps {
   open: boolean
@@ -767,13 +768,15 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                             <div className="h-4 w-4 rounded-full bg-accent-foreground" />
                           </div>
                           <div>
-                            <div className="font-medium">Music Practice Studio</div>
-                            <div className="text-sm text-muted-foreground">Version 1.0.0</div>
+                            <div className="font-medium">{APP_NAME}</div>
+                            <div className="text-sm text-muted-foreground">Version {APP_VERSION}</div>
                           </div>
                         </div>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          {APP_DESCRIPTION}
+                        </p>
                         <p className="text-xs text-muted-foreground">
-                          Professional music practice software with VST support, video playback, and sheet music
-                          integration.
+                          Created by {APP_AUTHOR}
                         </p>
                       </div>
                     </div>
