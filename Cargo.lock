@@ -4208,6 +4208,7 @@ dependencies = [
  "tauri-plugin-store",
  "tracing-subscriber",
  "vst3",
+ "walkdir",
 ]
 
 [[package]]

@@ -7,6 +7,16 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# [profile.dev]
+# Enable AddressSanitizer for better memory violation detection
+# Note: This requires nightly Rust
+# rustflags = ["-Zsanitizer=address"]
+
+[profile.dev]
+debug = true
+opt-level = 0
+panic = "abort"
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
@@ -32,3 +42,4 @@ serde_json.workspace = true
 tracing-subscriber.workspace = true
 tauri-plugin-store = "2"
 sysinfo = "0.30"
+walkdir = "2.4"

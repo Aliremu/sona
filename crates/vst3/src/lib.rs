@@ -27,6 +27,7 @@ pub use platform::macos::Module;
 #[cfg(target_os = "windows")]
 pub use platform::windows::Module;
 
+/// A smart pointer for VST objects owned by the plugin.
 #[derive(Debug, Clone, Copy)]
 pub struct VSTPtr<T: FUnknown_Impl> {
     data: *mut T,

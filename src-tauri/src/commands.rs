@@ -233,7 +233,7 @@ pub fn get_cpu_usage() -> Result<f32, String> {
 pub fn get_loaded_plugins(app_handle: tauri::AppHandle) -> Result<Vec<String>, AudioError> {
     let audio_state = app_handle.state::<GlobalAudio>();
     let engine = audio_state.lock().unwrap();
-    let plugins =  engine.plugin_modules();
+    let plugins = engine.plugin_modules();
 
-    Ok(plugins.iter().map(|plugin| plugin.name.clone()).collect())
+    Ok(plugins.values().map(|plugin| plugin.name.clone()).collect())
 }

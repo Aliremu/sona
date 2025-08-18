@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Result;
-use log::{info, warn};
+use log::{info, trace, warn};
 use vst3::{
     base::funknown::{
         FUnknown, FUnknown_HostImpl, FUnknown_Impl, IAudioProcessor, IAudioProcessor_Impl,
@@ -87,12 +87,12 @@ impl VSTHostContext {
 
                 let edit = match comp.get_controller_class_id() {
                     Ok(edit_cid) => {
-                        warn!("Initializing create_instance!");
+                        trace!("Initializing create_instance!");
                         factory.create_instance::<IEditController>(edit_cid)?
                     }
 
                     Err(err) => {
-                        warn!("Initializing query_interface! {:?}", err);
+                        trace!("Initializing query_interface! {:?}", err);
                         comp.query_interface::<IEditController>()?
                     }
                 };
@@ -102,17 +102,17 @@ impl VSTHostContext {
                 let component_connection = comp.query_interface::<IConnectionPoint>()?;
                 let controller_connection = edit.query_interface::<IConnectionPoint>()?;
 
-                info!("Component Connection: {:?}", component_connection);
-                info!("Controller Connection: {:?}", controller_connection);
+                trace!("Component Connection: {:?}", component_connection);
+                trace!("Controller Connection: {:?}", controller_connection);
 
                 component_connection.connect(controller_connection);
                 controller_connection.connect(component_connection);
 
-                warn!("Setting up processor!");
+                trace!("Setting up processor!");
 
                 let processor = comp.query_interface::<IAudioProcessor>()?;
 
-                warn!("Processor: {:?}", processor);
+                trace!("Processor: {:?}", processor);
 
                 let mut data = ProcessSetup {
                     process_mode: ProcessMode::Realtime,
@@ -122,7 +122,7 @@ impl VSTHostContext {
                 };
                 let res = processor.setup_processing(&mut data);
 
-                warn!(
+                trace!(
                     "AudioProcessor: {:?}. Setup Processing: {:?}",
                     processor, res
                 );
@@ -131,14 +131,14 @@ impl VSTHostContext {
                     let mut bus_info = BusInfo::default();
                     comp.get_bus_info(MediaType::Audio, BusDirection::Input, i, &mut bus_info);
 
-                    warn!("Bus Input Info: {:?}", bus_info);
+                    trace!("Bus Input Info: {:?}", bus_info);
                 }
 
                 for i in 0..comp.get_bus_count(MediaType::Audio, BusDirection::Output) {
                     let mut bus_info = BusInfo::default();
                     comp.get_bus_info(MediaType::Audio, BusDirection::Output, i, &mut bus_info);
 
-                    warn!("Bus Output Info: {:?}", bus_info);
+                    trace!("Bus Output Info: {:?}", bus_info);
                 }
 
                 comp.activate_bus(MediaType::Audio, BusDirection::Input, 0, true);
@@ -146,12 +146,12 @@ impl VSTHostContext {
 
                 comp.set_active(true);
 
-                warn!("Parameter count: {}", edit.get_parameter_count());
+                trace!("Parameter count: {}", edit.get_parameter_count());
 
-                warn!("Initializing editor controller!");
+                trace!("Initializing editor controller!");
                 let res = edit.initialize(context);
 
-                warn!("Setting command handler!");
+                trace!("Setting command handler!");
                 let res = edit.set_component_handler(Arc::into_raw(handler.clone()) as *mut _);
 
                 let view = edit.create_view(ViewType::Editor);

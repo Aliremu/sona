@@ -9,7 +9,7 @@ use rubato::{
 };
 use rustc_hash::FxHashMap;
 use std::cell::UnsafeCell;
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use vst3::base::funknown::IAudioProcessor_Impl;
 use vst3::vst::audio_processor::{
     AudioBusBuffers, ProcessContext, ProcessData, ProcessMode, SymbolicSampleSize,
@@ -17,6 +17,24 @@ use vst3::vst::audio_processor::{
 use vst::host::{HostParameterChanges, VSTHostContext};
 
 pub mod vst;
+
+/// Unique identifier for loaded plugins
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PluginId(u64);
+
+impl PluginId {
+    fn new() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        PluginId(NEXT_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl From<PluginId> for String {
+    fn from(id: PluginId) -> Self {
+        id.0.to_string()
+    }
+}
 
 #[repr(C)]
 #[derive(Clone)]
@@ -156,7 +174,7 @@ pub struct AudioEngine {
     input_params: Arc<UnsafeCell<HostParameterChanges>>,
     process_context: Arc<UnsafeCell<ProcessContext>>,
     process_data: Arc<ProcessData>,
-    plugin_modules: Arc<RwLock<Vec<VSTHostContext>>>,
+    plugin_modules: Arc<RwLock<FxHashMap<PluginId, VSTHostContext>>>,
 
     // Cached device information for performance
     cached_hosts: Vec<HostId>,
@@ -291,7 +309,7 @@ impl Default for AudioEngine {
             process_context: std::ptr::null_mut(),
         });
 
-        let plugin_modules = Arc::new(RwLock::new(Vec::new()));
+        let plugin_modules = Arc::new(RwLock::new(FxHashMap::default()));
 
         Self {
             host,
@@ -685,6 +703,7 @@ impl AudioEngine {
             move |data: &[i32], _: &cpal::InputCallbackInfo| {
                 let block_size = data.len() / channels;
 
+                // Copy input audio data to the input buffer
                 for (i, frame) in data.chunks(channels).enumerate() {
                     for j in 0..channels {
                         input_data.write(j, i, frame[j] as f32 / i32::MAX as f32);
@@ -692,8 +711,33 @@ impl AudioEngine {
                 }
 
                 unsafe {
-                    for plugin in plugin_modules.read().unwrap().iter() {
+                    let plugins = plugin_modules.read().unwrap();
+                    let plugin_list: Vec<_> = plugins.iter().collect();
+                    
+                    // Process plugins in a chain - each plugin's output becomes the next plugin's input
+                    for (index, (_plugin_id, plugin)) in plugin_list.iter().enumerate() {
                         let data = process_data.clone();
+                        
+                        // For the first plugin, input comes from the audio input
+                        // For subsequent plugins, we need to copy the previous plugin's output to current input
+                        if index > 0 {
+                            // Copy output_data to input_data for chaining
+                            for i in 0..block_size {
+                                for j in 0..channels {
+                                    let sample = (*output_data.data.get())[j][i];
+                                    input_data.write(j, i, sample);
+                                }
+                            }
+                        }
+                        
+                        // Clear the output buffer before processing
+                        for i in 0..block_size {
+                            for j in 0..channels {
+                                (*output_data.data.get())[j][i] = 0.0;
+                            }
+                        }
+                        
+                        // Process the plugin
                         plugin
                             .processor
                             .as_ref()
@@ -754,21 +798,47 @@ impl AudioEngine {
     }
 
     /// Add a VST plugin to the processing chain
-    pub fn add_plugin(&mut self, path: &str) -> Result<()> {
+    pub fn load_plugin(&mut self, path: &str) -> Result<PluginId> {
         let mut plugin = VSTHostContext::new(path)?;
 
         unsafe {
             plugin.processor.as_mut().unwrap().set_processing(true);
         }
 
-        self.plugin_modules.write().unwrap().push(plugin);
-        info!("Added plugin: {}", path);
-        Ok(())
+        let plugin_id = PluginId::new();
+        self.plugin_modules.write().unwrap().insert(plugin_id, plugin);
+        info!("Added plugin: {} with ID: {:?}", path, plugin_id);
+        Ok(plugin_id)
     }
 
     /// Get reference to loaded plugin modules
-    pub fn plugin_modules(&self) -> RwLockReadGuard<'_, Vec<VSTHostContext>> {
+    pub fn plugin_modules(&self) -> RwLockReadGuard<'_, FxHashMap<PluginId, VSTHostContext>> {
         self.plugin_modules.read().unwrap()
+    }
+
+    pub fn plugin_modules_mut(&mut self) -> RwLockWriteGuard<'_, FxHashMap<PluginId, VSTHostContext>> {
+        self.plugin_modules.write().unwrap()
+    }
+
+    /// Check if a plugin is loaded
+    pub fn is_plugin_loaded(&self, plugin_id: PluginId) -> bool {
+        self.plugin_modules.read().unwrap().contains_key(&plugin_id)
+    }
+
+    /// Remove a plugin by ID
+    pub fn unload_plugin(&mut self, plugin_id: PluginId) -> Result<()> {
+        match self.plugin_modules.write().unwrap().remove(&plugin_id) {
+            Some(_) => {
+                info!("Removed plugin with ID: {:?}", plugin_id);
+                Ok(())
+            }
+            None => Err(anyhow!("Plugin with ID {:?} not found", plugin_id)),
+        }
+    }
+
+    /// Get list of all loaded plugin IDs
+    pub fn get_loaded_plugin_ids(&self) -> Vec<PluginId> {
+        self.plugin_modules.read().unwrap().keys().copied().collect()
     }
 }
 

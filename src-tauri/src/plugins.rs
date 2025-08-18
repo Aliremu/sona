@@ -67,17 +67,36 @@ impl PluginRegistry {
         self.plugins.clear();
         
         for path in self.plugin_paths.clone() {
-            let entries = std::fs::read_dir(path).map_err(|e| e.to_string());
-            let Ok(entries) = entries else {
-              info!("Failed to read dir: {}", entries.unwrap_err());
-              continue;
-            };
+            // Check if the path exists before scanning
+            if !std::path::Path::new(&path).exists() {
+                info!("Skipping non-existent path: {}", path);
+                continue;
+            }
 
-            for entry in entries {
-                let entry = entry.map_err(|e| e.to_string())?;
-                if entry.path().extension().map_or(false, |ext| ext == "vst3") {
-                    self.add_plugin(entry.path().to_string_lossy().into_owned());
-                }
+            // Use walkdir for recursive directory traversal
+            let walker = walkdir::WalkDir::new(&path)
+                .follow_links(false) // Don't follow symlinks to avoid infinite loops
+                .into_iter()
+                .filter_map(|e| {
+                    match e {
+                        Ok(entry) => Some(entry),
+                        Err(err) => {
+                            info!("Error accessing path during scan: {}", err);
+                            None
+                        }
+                    }
+                })
+                .filter(|e| e.file_type().is_file()) // Only process files, not directories
+                .filter(|e| {
+                    // Check if file has .vst3 extension
+                    e.path().extension()
+                        .and_then(|ext| ext.to_str())
+                        .map_or(false, |ext| ext.eq_ignore_ascii_case("vst3"))
+                });
+
+            for entry in walker {
+                let plugin_path = entry.path().to_string_lossy().to_string();
+                self.add_plugin(plugin_path);
             }
         }
         
