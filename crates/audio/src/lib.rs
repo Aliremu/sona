@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, HostId, StreamConfig, SupportedStreamConfigRange};
-use log::{error, info, warn};
+use cpal::{Device, HostId, SampleFormat, StreamConfig, SupportedStreamConfig, SupportedStreamConfigRange};
+use log::{error, info, trace, warn};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
 use rubato::{
@@ -111,17 +111,24 @@ impl<T: Copy + Clone, const CHANNELS: usize, const BUFFER_SIZE: usize> Drop
 
 /// Selects the best audio format from available configurations
 #[allow(dead_code)]
-fn pick_best_format<I>(configs: I) -> Option<cpal::SupportedStreamConfig>
+fn pick_best_format<I>(
+    configs: I,
+    preferred_sample_rate: Option<u32>,
+    preferred_buffer_size: Option<u32>,
+    preferred_sample_format: Option<cpal::SampleFormat>,
+    preferred_channels: Option<u16>,
+) -> Option<cpal::SupportedStreamConfig>
 where
     I: Iterator<Item = cpal::SupportedStreamConfigRange>,
 {
     let mut best_config = None;
-    let mut max_rank = 0;
-    
+    let mut best_score = (0, 0, 0, 0); // (sample_rate_match, buffer_size_match, format_score, channel_match)
+
     for config in configs {
-        let rank = match config.sample_format() {
-            cpal::SampleFormat::F32 => 7,
-            cpal::SampleFormat::I32 => 6,
+        // Calculate sample format priority score
+        let format_score = match config.sample_format() {
+            cpal::SampleFormat::I32 => 7,
+            cpal::SampleFormat::F32 => 6,
             cpal::SampleFormat::U32 => 5,
             cpal::SampleFormat::I16 => 4,
             cpal::SampleFormat::U16 => 3,
@@ -130,9 +137,73 @@ where
             _ => continue,
         };
 
-        if rank > max_rank {
-            max_rank = rank;
-            best_config = Some(config.with_max_sample_rate());
+        // Check if sample rate matches (highest priority)
+        let sample_rate_match = if let Some(preferred_rate) = preferred_sample_rate {
+            if config.min_sample_rate().0 <= preferred_rate && preferred_rate <= config.max_sample_rate().0 {
+                1
+            } else {
+                0
+            }
+        } else {
+            1 // If no preference, consider it a match
+        };
+
+        // Check buffer size match (second priority)
+        let buffer_size_match = if let Some(preferred_size) = preferred_buffer_size {
+            match config.buffer_size() {
+                cpal::SupportedBufferSize::Range { min, max } => {
+                    if *min <= preferred_size && preferred_size <= *max {
+                        1
+                    } else {
+                        0
+                    }
+                },
+                cpal::SupportedBufferSize::Unknown => 1, // Assume it can handle any size
+            }
+        } else {
+            1 // If no preference, consider it a match
+        };
+
+        // Check sample format match (third priority)
+        let format_match_score = if let Some(preferred_format) = preferred_sample_format {
+            if config.sample_format() == preferred_format {
+                format_score + 100 // Boost score significantly for exact format match
+            } else {
+                format_score
+            }
+        } else {
+            format_score
+        };
+
+        // Check channels match (fourth priority)
+        let channel_match_score = if let Some(preferred_channels) = preferred_channels {
+            if config.channels() == preferred_channels {
+                1
+            } else {
+                0
+            }
+        } else {
+            1
+        };
+
+        let current_score = (sample_rate_match, buffer_size_match, format_match_score, channel_match_score);
+
+        // Choose config with better score (sample_rate > buffer_size > format > channels)
+        if current_score > best_score {
+            best_score = current_score;
+            
+            // Create the config with the preferred sample rate if available and supported
+            let selected_config = if let Some(preferred_rate) = preferred_sample_rate {
+                if config.min_sample_rate().0 <= preferred_rate && preferred_rate <= config.max_sample_rate().0 {
+                    config.with_sample_rate(cpal::SampleRate(preferred_rate))
+                } else {
+                    config.with_max_sample_rate()
+                }
+            } else {
+                config.with_max_sample_rate()
+            };
+            
+            best_config = Some(selected_config);
         }
     }
 
@@ -510,12 +581,43 @@ impl AudioEngine {
     pub fn select_input(&mut self, device_name: &str) -> Result<()> {
         self.stop_streams();
 
+        info!("Stopping streams");
+
+        // Reset devices to None first
+        if self.host.id() == HostId::Asio {
+            self.input_device = None;
+            self.output_device = None;
+            self.input_config = None;
+            self.output_config = None;
+
+            // Store current host ID to recreate it
+            let current_host_id = self.host.id();
+
+            // Recreate the host to refresh its internal state
+            self.host = cpal::host_from_id(current_host_id)?;
+        }
+
+        trace!("Reset host and devices, now selecting input device: {}", device_name);
+
         let device = self.host
             .input_devices()?
             .find(|d| d.name().map_or(false, |name| name == device_name))
-            .ok_or_else(|| anyhow!("Input device '{}' not found", device_name))?;
+            .ok_or_else(|| {
+                info!("Input device '{}' not found", device_name);
+                anyhow!("Input device '{}' not found", device_name)
+            })?;
 
-        self.input_config = device.default_input_config().ok().map(|c| c.into());
+        trace!("Supported input configs: {:?}", device.supported_input_configs().map(|m| m.collect::<Vec<_>>()).unwrap_or_default());
+
+        self.input_config = Some(pick_best_format(
+            device.supported_input_configs().unwrap(),
+            Some(48000), // No preferred sample rate
+            Some(256), // No preferred buffer size
+            Some(SampleFormat::I32), // No preferred sample format
+            Some(2),
+        )
+            .ok_or_else(|| anyhow!("No supported input configurations for device '{}'", device_name)).unwrap().into());
+        //device.default_input_config().ok().map(|c| c.into());
         self.input_device = Some(device);
 
         // Handle ASIO/CoreAudio device exclusivity
@@ -541,12 +643,38 @@ impl AudioEngine {
     pub fn select_output(&mut self, device_name: &str) -> Result<()> {
         self.stop_streams();
 
+        // Reset devices to None first
+        if self.host.id() == HostId::Asio {
+            self.input_device = None;
+            self.output_device = None;
+            self.input_config = None;
+            self.output_config = None;
+
+            // Store current host ID to recreate it
+            let current_host_id = self.host.id();
+
+            // Recreate the host to refresh its internal state
+            self.host = cpal::host_from_id(current_host_id)?;
+        }
+
+        trace!("Reset host and devices, now selecting output device: {}", device_name);
+
         let device = self.host
             .output_devices()?
             .find(|d| d.name().map_or(false, |name| name == device_name))
             .ok_or_else(|| anyhow!("Output device '{}' not found", device_name))?;
 
-        self.output_config = device.default_output_config().ok().map(|c| c.into());
+        trace!("Supported output configs: {:?}", device.supported_output_configs().map(|m| m.collect::<Vec<_>>()).unwrap_or_default());
+
+        self.output_config = Some(pick_best_format(
+            device.supported_output_configs().unwrap(),
+            Some(48000), // No preferred sample rate
+            Some(256), // No preferred buffer size
+            Some(SampleFormat::I32), // No preferred sample format
+            Some(2), // No preferred channels
+        )
+            .ok_or_else(|| anyhow!("No supported input configurations for device '{}'", device_name)).unwrap().into());
+        //device.default_output_config().ok().map(|c| c.into());
         self.output_device = Some(device);
 
         // Handle ASIO/CoreAudio device exclusivity
@@ -697,6 +825,9 @@ impl AudioEngine {
         let mut resampled_data = self.resampled_data.clone();
 
         info!("Creating input stream with config: {:?}", input_config);
+
+        let input_format = input_device.default_input_config().unwrap();
+        info!("Input format: {:?}", input_format);
 
         let input_stream = input_device.build_input_stream(
             input_config,
@@ -857,6 +988,21 @@ mod tests {
         )
     }
 
+    fn make_range_with_config(
+        fmt: SampleFormat, 
+        min_rate: u32, 
+        max_rate: u32, 
+        buffer_size: SupportedBufferSize
+    ) -> SupportedStreamConfigRange {
+        SupportedStreamConfigRange::new(
+            2,
+            SampleRate(min_rate),
+            SampleRate(max_rate),
+            buffer_size,
+            fmt
+        )
+    }
+
     #[test]
     fn test_pick_best_format_prefers_f32() {
         let configs = vec![
@@ -864,7 +1010,7 @@ mod tests {
             make_range(SampleFormat::F32),
             make_range(SampleFormat::U16),
         ];
-        let result = pick_best_format(configs.into_iter());
+        let result = pick_best_format(configs.into_iter(), None, None, None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().sample_format(), SampleFormat::F32);
     }
@@ -875,7 +1021,7 @@ mod tests {
             make_range(SampleFormat::U32),
             make_range(SampleFormat::I32),
         ];
-        let result = pick_best_format(configs.into_iter());
+        let result = pick_best_format(configs.into_iter(), None, None, None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().sample_format(), SampleFormat::I32);
     }
@@ -883,7 +1029,7 @@ mod tests {
     #[test]
     fn test_pick_best_format_returns_none_for_empty() {
         let configs: Vec<SupportedStreamConfigRange> = vec![];
-        let result = pick_best_format(configs.into_iter());
+        let result = pick_best_format(configs.into_iter(), None, None, None, None);
         assert!(result.is_none());
     }
 
@@ -894,9 +1040,59 @@ mod tests {
             make_range(SampleFormat::I8),
             make_range(SampleFormat::I16),
         ];
-        let result = pick_best_format(configs.into_iter());
+        let result = pick_best_format(configs.into_iter(), None, None, None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().sample_format(), SampleFormat::I16);
+    }
+
+    #[test]
+    fn test_pick_best_format_prioritizes_sample_rate() {
+        let configs = vec![
+            make_range_with_config(SampleFormat::F32, 22050, 22050, SupportedBufferSize::Unknown),
+            make_range_with_config(SampleFormat::I16, 44100, 44100, SupportedBufferSize::Unknown),
+        ];
+        let result = pick_best_format(configs.into_iter(), Some(44100), None, None, None);
+        assert!(result.is_some());
+        let config = result.unwrap();
+        assert_eq!(config.sample_format(), SampleFormat::I16);
+        assert_eq!(config.sample_rate().0, 44100);
+    }
+
+    #[test]
+    fn test_pick_best_format_prioritizes_buffer_size() {
+        use cpal::SupportedBufferSize;
+        let configs = vec![
+            make_range_with_config(SampleFormat::F32, 44100, 44100, SupportedBufferSize::Range { min: 128, max: 256 }),
+            make_range_with_config(SampleFormat::I16, 44100, 44100, SupportedBufferSize::Range { min: 512, max: 1024 }),
+        ];
+        let result = pick_best_format(configs.into_iter(), Some(44100), Some(512), None, None);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().sample_format(), SampleFormat::I16);
+    }
+
+    #[test]
+    fn test_pick_best_format_exact_format_match() {
+        let configs = vec![
+            make_range(SampleFormat::I16),
+            make_range(SampleFormat::F32),
+        ];
+        let result = pick_best_format(configs.into_iter(), None, None, Some(SampleFormat::I16), None);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().sample_format(), SampleFormat::I16);
+    }
+
+    #[test]
+    fn test_pick_best_format_all_preferences_match() {
+        use cpal::SupportedBufferSize;
+        let configs = vec![
+            make_range_with_config(SampleFormat::I16, 22050, 22050, SupportedBufferSize::Range { min: 128, max: 256 }),
+            make_range_with_config(SampleFormat::F32, 44100, 48000, SupportedBufferSize::Range { min: 512, max: 1024 }),
+        ];
+        let result = pick_best_format(configs.into_iter(), Some(44100), Some(512), Some(SampleFormat::F32), None);
+        assert!(result.is_some());
+        let config = result.unwrap();
+        assert_eq!(config.sample_format(), SampleFormat::F32);
+        assert_eq!(config.sample_rate().0, 44100);
     }
 
     #[test]
