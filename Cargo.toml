@@ -12,6 +12,13 @@ resolver = "2"
 publish = false
 edition = "2024"
 
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+
 [workspace.dependencies]
 audio = { path = "crates/audio" }
 vst3 = { path = "crates/vst3" }

@@ -180,26 +180,27 @@ pub fn set_plugin_paths(app_handle: tauri::AppHandle, paths: Vec<String>) -> Res
 
 #[tauri::command]
 pub fn browse_directory(app_handle: tauri::AppHandle) -> Result<(), String> {
-    use tauri_plugin_dialog::DialogExt;
     use tauri::Emitter;
-    
+    use tauri_plugin_dialog::DialogExt;
+
     // Use the dialog with a callback instead of await
-    app_handle.dialog()
+    app_handle
+        .dialog()
         .file()
         .set_title("Select VST Plugin Directory")
-        .pick_folder(move |result| {
-            match result {
-                Some(path) => {
-                    let path_str = path.as_path().map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "Unknown path".to_string());
-                    let _ = app_handle.emit("directory-selected", path_str);
-                },
-                None => {
-                    let _ = app_handle.emit("directory-cancelled", ());
-                },
+        .pick_folder(move |result| match result {
+            Some(path) => {
+                let path_str = path
+                    .as_path()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown path".to_string());
+                let _ = app_handle.emit("directory-selected", path_str);
+            }
+            None => {
+                let _ = app_handle.emit("directory-cancelled", ());
             }
         });
-    
+
     Ok(())
 }
 
@@ -221,24 +222,24 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<String>, String>
 
 #[tauri::command]
 pub fn get_cpu_usage() -> Result<f32, String> {
-    use sysinfo::{System};
-    
+    use sysinfo::System;
+
     let mut system = System::new_all();
     system.refresh_cpu(); // Refresh CPU information.
-    
+
     // Wait a bit because CPU usage is calculated over time
     std::thread::sleep(std::time::Duration::from_millis(200));
     system.refresh_cpu();
-    
+
     // Calculate average CPU usage across all cores
     let cpus = system.cpus();
     if cpus.is_empty() {
         return Err("No CPU information available".to_string());
     }
-    
+
     let total_usage: f32 = cpus.iter().map(|cpu| cpu.cpu_usage()).sum();
     let average_usage = total_usage / cpus.len() as f32;
-    
+
     Ok(average_usage)
 }
 
@@ -268,10 +269,13 @@ pub fn get_loaded_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginInfo
 
     let plugins = engine.plugin_modules();
 
-    Ok(plugins.values().map(|plugin| PluginInfo {
-        id: plugin.id,
-        name: plugin.name.clone(),
-    }).collect())
+    Ok(plugins
+        .values()
+        .map(|plugin| PluginInfo {
+            id: plugin.id,
+            name: plugin.name.clone(),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -279,7 +283,10 @@ pub fn load_plugin(app_handle: tauri::AppHandle, path: &str) -> Result<(), Audio
     let audio_state = app_handle.state::<GlobalAudio>();
     let mut engine = audio_state.lock().unwrap();
 
-    engine.load_plugin(path).map(|_| ()).map_err(|_| AudioError::PluginLoadError)
+    engine
+        .load_plugin(path)
+        .map(|_| ())
+        .map_err(|_| AudioError::PluginLoadError)
 }
 
 #[tauri::command]
@@ -287,7 +294,10 @@ pub fn remove_plugin(app_handle: tauri::AppHandle, plugin_id: u64) -> Result<(),
     let audio_state = app_handle.state::<GlobalAudio>();
     let mut engine = audio_state.lock().unwrap();
 
-    engine.remove_plugin(PluginId(plugin_id)).map(|_| ()).map_err(|_| AudioError::PluginLoadError)
+    engine
+        .remove_plugin(PluginId(plugin_id))
+        .map(|_| ())
+        .map_err(|_| AudioError::PluginLoadError)
 }
 
 #[tauri::command]
@@ -302,14 +312,19 @@ pub fn open_plugin_editor(app_handle: tauri::AppHandle, plugin_id: u64) -> Resul
         // Get the first plugin (any plugin from the map)
         let plugin = modules.get_mut(&plugin_id).unwrap();
 
-        let window = tauri::WindowBuilder::new(&app_handle, plugin_id).build().map_err(|_| AudioError::PluginEditorError)?;
+        let window = tauri::WindowBuilder::new(&app_handle, plugin_id)
+            .build()
+            .map_err(|_| AudioError::PluginEditorError)?;
         let _ = window.set_title(&plugin.name);
         let _ = window.set_resizable(false);
 
         #[cfg(target_os = "windows")]
         let hwnd = window.hwnd().map_err(|_| AudioError::PluginEditorError)?.0;
         #[cfg(target_os = "macos")]
-        let hwnd = window.ns_view().map_err(|_| AudioError::PluginEditorError)?.0;
+        let hwnd = window
+            .ns_view()
+            .map_err(|_| AudioError::PluginEditorError)?
+            .0;
 
         // plugin.component.unwrap().set_active(false);
 
@@ -329,16 +344,21 @@ pub fn open_plugin_editor(app_handle: tauri::AppHandle, plugin_id: u64) -> Resul
         view.on_size(&mut rect);
         let new_size = PhysicalSize::new(rect.right, rect.bottom).to_logical::<i32>(scale_factor);
         let _ = window.set_size(new_size);
-        
+
         let cloned_window = window.clone();
 
         plugin.set_window_resize_callback(move |view, new_size| {
             view.on_size(&mut *new_size);
-            let _ = cloned_window.set_size(PhysicalSize::new(new_size.right, new_size.bottom).to_logical::<i32>(scale_factor)).unwrap();
+            let _ = cloned_window
+                .set_size(
+                    PhysicalSize::new(new_size.right, new_size.bottom)
+                        .to_logical::<i32>(scale_factor),
+                )
+                .unwrap();
         });
 
         window.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
                 view.removed();
             }
         });

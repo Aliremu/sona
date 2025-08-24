@@ -1,18 +1,12 @@
 use audio::AudioEngine;
-use log::{error, info, trace};
+use log::info;
 use serde_json::json;
+use std::sync::Mutex;
+use tauri::{Manager, RunEvent};
 use tauri_plugin_store::StoreExt;
-use tracing_subscriber::EnvFilter;
-use std::ffi::c_void;
-use std::{ffi::CStr, sync::Mutex};
-use tauri::{LogicalSize, Manager, PhysicalSize, RunEvent};
-use tauri_plugin_store::JsonValue;
 use tracing_subscriber::fmt::time::LocalTime;
-use vst3::base::funknown::IComponent_Impl;
-use vst3::{base::funknown::IPlugView_Impl, gui::plug_view::PlatformType};
-use vst3::{base::funknown::IPluginFactory_Impl, gui::plug_view::ViewRect};
+use tracing_subscriber::EnvFilter;
 
-use crate::commands::load_plugin;
 use crate::plugins::PluginRegistry;
 
 mod commands;
@@ -58,8 +52,12 @@ pub fn run() {
             commands::open_plugin_editor,
         ])
         .setup(|app| {
-            app.manage(Mutex::new(settings::create_audio_engine_from_settings(app.app_handle())));
-            app.manage(Mutex::new(settings::create_plugin_registry_from_settings(app.app_handle())));
+            app.manage(Mutex::new(settings::create_audio_engine_from_settings(
+                app.app_handle(),
+            )));
+            app.manage(Mutex::new(settings::create_plugin_registry_from_settings(
+                app.app_handle(),
+            )));
 
             Ok(())
         })
@@ -67,25 +65,31 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(move |app, event| {
             match &event {
-                RunEvent::ExitRequested { code, api, .. } => {
+                RunEvent::ExitRequested { .. } => {
                     info!("Goodbye...");
                     let audio_state = app.state::<GlobalAudio>();
                     let engine = audio_state.lock().unwrap();
                     let plugin_registry = app.state::<GlobalPluginRegistry>();
 
                     let store = app.store(".settings.json").unwrap();
-                    store.set("audio-settings", json!({
-                        "host": engine.host_name(),
-                        "input": engine.input_device_name(),
-                        "output": engine.output_device_name(),
-                        "buffer_size": engine.buffer_size()
-                    }));
+                    store.set(
+                        "audio-settings",
+                        json!({
+                            "host": engine.host_name(),
+                            "input": engine.input_device_name(),
+                            "output": engine.output_device_name(),
+                            "buffer_size": engine.buffer_size()
+                        }),
+                    );
 
-                    store.set("plugin-paths", plugin_registry.lock().unwrap().get_plugin_paths());
+                    store.set(
+                        "plugin-paths",
+                        plugin_registry.lock().unwrap().get_plugin_paths(),
+                    );
 
                     store.save().unwrap();
                     store.close_resource();
-                },
+                }
 
                 _ => {}
             };

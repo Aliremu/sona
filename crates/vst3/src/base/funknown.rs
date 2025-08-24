@@ -3,11 +3,11 @@
 use anyhow::anyhow;
 use libc::c_char;
 use log::warn;
-use vst3_macro::interface;
 use std::error::Error;
 use std::ffi::{CStr, CString, c_float, c_void};
 use std::fmt::Formatter;
 use std::ops::Not;
+use vst3_macro::interface;
 
 use crate::gui::plug_view::{IPlugFrame, ViewRect};
 use crate::uid_to_ascii;

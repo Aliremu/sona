@@ -1,11 +1,13 @@
 #![allow(unused_variables)]
 
 use std::{
-    ffi::{c_char, c_void, CStr}, sync::Arc
+    ffi::{c_char, c_void, CStr},
+    sync::Arc,
 };
 
 use anyhow::Result;
 use log::{info, trace, warn};
+use rustc_hash::FxHashMap;
 use vst3::{
     base::funknown::{
         FUnknown, FUnknown_HostImpl, FUnknown_Impl, IAudioProcessor, IAudioProcessor_Impl,
@@ -29,7 +31,6 @@ use vst3::{
     },
     Module, VSTPtr,
 };
-use rustc_hash::FxHashMap;
 
 /// Unique identifier for loaded plugins
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -149,7 +150,8 @@ impl VSTHostContext {
 
                 trace!(
                     "AudioProcessor: {:?}. Setup Processing: {:?}",
-                    processor, res
+                    processor,
+                    res
                 );
 
                 for i in 0..comp.get_bus_count(MediaType::Audio, BusDirection::Input) {
@@ -180,11 +182,11 @@ impl VSTHostContext {
                 let res = edit.set_component_handler(Arc::into_raw(handler.clone()) as *mut _);
 
                 let view = edit.create_view(ViewType::Editor);
-                
+
                 // Create the frame on the heap for FFI safety
                 let host_frame = Box::into_raw(Box::new(HostPlugFrame::new()));
                 (*(view)).set_frame(host_frame as *mut _ as *mut IPlugFrame);
-                
+
                 // Store the frame pointer for cleanup later
                 ctx.host_frame = Some(host_frame);
 
@@ -210,9 +212,9 @@ impl VSTHostContext {
 
     /// Safely set a window resize callback on the HostPlugFrame
     /// This method ensures the frame exists and provides safe access to it
-    pub fn set_window_resize_callback<F>(&mut self, callback: F) 
-    where 
-        F: FnMut(&mut IPlugView, &mut ViewRect) + Send + 'static 
+    pub fn set_window_resize_callback<F>(&mut self, callback: F)
+    where
+        F: FnMut(&mut IPlugView, &mut ViewRect) + Send + 'static,
     {
         if let Some(frame_ptr) = self.host_frame {
             unsafe {
@@ -225,12 +227,10 @@ impl VSTHostContext {
     /// Use this for other operations on the frame
     pub fn with_frame<F, R>(&mut self, f: F) -> Option<R>
     where
-        F: FnOnce(&mut HostPlugFrame) -> R
+        F: FnOnce(&mut HostPlugFrame) -> R,
     {
         if let Some(frame_ptr) = self.host_frame {
-            unsafe {
-                Some(f(&mut *frame_ptr))
-            }
+            unsafe { Some(f(&mut *frame_ptr)) }
         } else {
             None
         }

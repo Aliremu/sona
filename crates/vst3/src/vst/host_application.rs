@@ -4,9 +4,9 @@ use crate::base::funknown::{
 };
 use libc::c_char;
 use log::{error, warn};
-use vst3_macro::{implement, interface};
 use std::collections::HashMap;
 use std::ffi::{CStr, c_void};
+use vst3_macro::{implement, interface};
 
 pub type String128 = [u16; 128];
 

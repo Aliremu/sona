@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, HostId, SampleFormat, StreamConfig, SupportedStreamConfig, SupportedStreamConfigRange};
+use cpal::{Device, HostId, SampleFormat, StreamConfig, SupportedStreamConfigRange};
 use log::{error, info, trace, warn};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
@@ -10,11 +10,11 @@ use rubato::{
 use rustc_hash::FxHashMap;
 use std::cell::UnsafeCell;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use vst::host::{HostParameterChanges, VSTHostContext};
 use vst3::base::funknown::IAudioProcessor_Impl;
 use vst3::vst::audio_processor::{
     AudioBusBuffers, ProcessContext, ProcessData, ProcessMode, SymbolicSampleSize,
 };
-use vst::host::{HostParameterChanges, VSTHostContext};
 
 use crate::vst::host::PluginId;
 
@@ -123,7 +123,9 @@ where
 
         // Check if sample rate matches (highest priority)
         let sample_rate_match = if let Some(preferred_rate) = preferred_sample_rate {
-            if config.min_sample_rate().0 <= preferred_rate && preferred_rate <= config.max_sample_rate().0 {
+            if config.min_sample_rate().0 <= preferred_rate
+                && preferred_rate <= config.max_sample_rate().0
+            {
                 1
             } else {
                 0
@@ -141,7 +143,7 @@ where
                     } else {
                         0
                     }
-                },
+                }
                 cpal::SupportedBufferSize::Unknown => 1, // Assume it can handle any size
             }
         } else {
@@ -170,15 +172,22 @@ where
             1
         };
 
-        let current_score = (sample_rate_match, buffer_size_match, format_match_score, channel_match_score);
+        let current_score = (
+            sample_rate_match,
+            buffer_size_match,
+            format_match_score,
+            channel_match_score,
+        );
 
         // Choose config with better score (sample_rate > buffer_size > format > channels)
         if current_score > best_score {
             best_score = current_score;
-            
+
             // Create the config with the preferred sample rate if available and supported
             let selected_config = if let Some(preferred_rate) = preferred_sample_rate {
-                if config.min_sample_rate().0 <= preferred_rate && preferred_rate <= config.max_sample_rate().0 {
+                if config.min_sample_rate().0 <= preferred_rate
+                    && preferred_rate <= config.max_sample_rate().0
+                {
                     config.with_sample_rate(cpal::SampleRate(preferred_rate))
                 } else {
                     config.with_max_sample_rate()
@@ -186,7 +195,7 @@ where
             } else {
                 config.with_max_sample_rate()
             };
-            
+
             best_config = Some(selected_config);
         }
     }
@@ -213,7 +222,7 @@ pub struct AudioEngine {
     output_device: Option<cpal::Device>,
     input_config: Option<cpal::StreamConfig>,
     output_config: Option<cpal::StreamConfig>,
-    
+
     // Audio streams
     input_stream: Option<cpal::Stream>,
     output_stream: Option<cpal::Stream>,
@@ -246,7 +255,7 @@ pub struct AudioEngine {
 impl Default for AudioEngine {
     fn default() -> Self {
         // Initialize caches
-        let mut cached_hosts = Vec::new();   
+        let mut cached_hosts = Vec::new();
         let mut cached_input_devices = FxHashMap::default();
         let mut cached_output_devices = FxHashMap::default();
         let mut cached_input_configs = FxHashMap::default();
@@ -266,12 +275,12 @@ impl Default for AudioEngine {
                 let device_names: Vec<String> = input_devices
                     .filter_map(|device| {
                         let name = device.name().ok()?;
-                        
+
                         // Cache input configs for this device
                         if let Ok(configs) = device.supported_input_configs() {
                             cached_input_configs.insert(name.clone(), configs.collect());
                         }
-                        
+
                         Some(name)
                     })
                     .collect();
@@ -283,12 +292,12 @@ impl Default for AudioEngine {
                 let device_names: Vec<String> = output_devices
                     .filter_map(|device| {
                         let name = device.name().ok()?;
-                        
+
                         // Cache output configs for this device
                         if let Ok(configs) = device.supported_output_configs() {
                             cached_output_configs.insert(name.clone(), configs.collect());
                         }
-                        
+
                         Some(name)
                     })
                     .collect();
@@ -301,32 +310,34 @@ impl Default for AudioEngine {
         let input_device = host.default_input_device();
         let output_device = host.default_output_device();
 
-        let (input_config, output_config, current_sample_rate, current_buffer_size) = 
+        let (input_config, output_config, current_sample_rate, current_buffer_size) =
             if let (Some(ref input_dev), Some(ref output_dev)) = (&input_device, &output_device) {
                 let input_cfg = input_dev.default_input_config().ok().map(|c| c.into());
                 let output_cfg = output_dev.default_output_config().ok().map(|c| c.into());
-                
-                let sample_rate = input_cfg.as_ref()
+
+                let sample_rate = input_cfg
+                    .as_ref()
                     .map(|c: &StreamConfig| c.sample_rate.0)
                     .unwrap_or(48000);
-                let buffer_size = input_cfg.as_ref()
-                    .and_then(|c: &StreamConfig| {
-                        match c.buffer_size {
-                            cpal::BufferSize::Fixed(size) => Some(size),
-                            cpal::BufferSize::Default => Some(512),
-                        }
+                let buffer_size = input_cfg
+                    .as_ref()
+                    .and_then(|c: &StreamConfig| match c.buffer_size {
+                        cpal::BufferSize::Fixed(size) => Some(size),
+                        cpal::BufferSize::Default => Some(512),
                     })
                     .unwrap_or(512);
-                    
+
                 (input_cfg, output_cfg, sample_rate, buffer_size)
             } else {
                 (None, None, 48000, 512)
             };
 
-        info!("Creating AudioEngine with:\n\tHost: {:?}\n\tInput: {:?}\n\tOutput: {:?}", 
-              host.id(), 
-              input_device.as_ref().and_then(|d| d.name().ok()),
-              output_device.as_ref().and_then(|d| d.name().ok()));
+        info!(
+            "Creating AudioEngine with:\n\tHost: {:?}\n\tInput: {:?}\n\tOutput: {:?}",
+            host.id(),
+            input_device.as_ref().and_then(|d| d.name().ok()),
+            output_device.as_ref().and_then(|d| d.name().ok())
+        );
 
         // Initialize audio processing data
         let mut input_data = Sync2DArray::<f32, 2, MAX_BLOCK_SIZE>::new(0.0f32, MAX_BLOCK_SIZE);
@@ -408,7 +419,10 @@ impl AudioEngine {
 
     /// Get all available audio host names
     pub fn available_host_names(&self) -> Vec<String> {
-        self.cached_hosts.iter().map(|host_id| host_id.name().to_string()).collect()
+        self.cached_hosts
+            .iter()
+            .map(|host_id| host_id.name().to_string())
+            .collect()
     }
 
     /// Get available input devices for the current host
@@ -418,14 +432,21 @@ impl AudioEngine {
 
     /// Get available input device names for the current host
     pub fn available_input_device_names(&self) -> Result<Vec<String>> {
-        Ok(self.host.input_devices()?
+        Ok(self
+            .host
+            .input_devices()?
             .filter_map(|device| device.name().ok())
             .collect())
     }
 
     /// Get available input configurations for a specific device
-    pub fn available_input_configs(&self, device_name: &str) -> Option<&[SupportedStreamConfigRange]> {
-        self.cached_input_configs.get(device_name).map(|v| v.as_slice())
+    pub fn available_input_configs(
+        &self,
+        device_name: &str,
+    ) -> Option<&[SupportedStreamConfigRange]> {
+        self.cached_input_configs
+            .get(device_name)
+            .map(|v| v.as_slice())
     }
 
     /// Get available output devices for the current host
@@ -435,14 +456,21 @@ impl AudioEngine {
 
     /// Get available output device names for the current host
     pub fn available_output_device_names(&self) -> Result<Vec<String>> {
-        Ok(self.host.output_devices()?
+        Ok(self
+            .host
+            .output_devices()?
             .filter_map(|device| device.name().ok())
             .collect())
     }
 
     /// Get available output configurations for a specific device
-    pub fn available_output_configs(&self, device_name: &str) -> Option<&[SupportedStreamConfigRange]> {
-        self.cached_output_configs.get(device_name).map(|v| v.as_slice())
+    pub fn available_output_configs(
+        &self,
+        device_name: &str,
+    ) -> Option<&[SupportedStreamConfigRange]> {
+        self.cached_output_configs
+            .get(device_name)
+            .map(|v| v.as_slice())
     }
 
     /// Get cached input device names for a specific host (more efficient)
@@ -452,17 +480,23 @@ impl AudioEngine {
 
     /// Get cached output device names for a specific host (more efficient)
     pub fn cached_output_device_names(&self, host_id: &HostId) -> Option<&[String]> {
-        self.cached_output_devices.get(host_id).map(|v| v.as_slice())
+        self.cached_output_devices
+            .get(host_id)
+            .map(|v| v.as_slice())
     }
 
     /// Get cached input device names for the current host
     pub fn cached_current_input_device_names(&self) -> Option<&[String]> {
-        self.cached_input_devices.get(&self.host.id()).map(|v| v.as_slice())
+        self.cached_input_devices
+            .get(&self.host.id())
+            .map(|v| v.as_slice())
     }
 
     /// Get cached output device names for the current host
     pub fn cached_current_output_device_names(&self) -> Option<&[String]> {
-        self.cached_output_devices.get(&self.host.id()).map(|v| v.as_slice())
+        self.cached_output_devices
+            .get(&self.host.id())
+            .map(|v| v.as_slice())
     }
 
     /// Get the current host
@@ -581,9 +615,13 @@ impl AudioEngine {
             self.host = cpal::host_from_id(current_host_id)?;
         }
 
-        trace!("Reset host and devices, now selecting input device: {}", device_name);
+        trace!(
+            "Reset host and devices, now selecting input device: {}",
+            device_name
+        );
 
-        let device = self.host
+        let device = self
+            .host
             .input_devices()?
             .find(|d| d.name().map_or(false, |name| name == device_name))
             .ok_or_else(|| {
@@ -591,16 +629,31 @@ impl AudioEngine {
                 anyhow!("Input device '{}' not found", device_name)
             })?;
 
-        trace!("Supported input configs: {:?}", device.supported_input_configs().map(|m| m.collect::<Vec<_>>()).unwrap_or_default());
+        trace!(
+            "Supported input configs: {:?}",
+            device
+                .supported_input_configs()
+                .map(|m| m.collect::<Vec<_>>())
+                .unwrap_or_default()
+        );
 
-        self.input_config = Some(pick_best_format(
-            device.supported_input_configs().unwrap(),
-            Some(48000), // No preferred sample rate
-            Some(256), // No preferred buffer size
-            Some(SampleFormat::I32), // No preferred sample format
-            Some(2),
-        )
-            .ok_or_else(|| anyhow!("No supported input configurations for device '{}'", device_name)).unwrap().into());
+        self.input_config = Some(
+            pick_best_format(
+                device.supported_input_configs().unwrap(),
+                Some(48000),             // No preferred sample rate
+                Some(256),               // No preferred buffer size
+                Some(SampleFormat::I32), // No preferred sample format
+                Some(2),
+            )
+            .ok_or_else(|| {
+                anyhow!(
+                    "No supported input configurations for device '{}'",
+                    device_name
+                )
+            })
+            .unwrap()
+            .into(),
+        );
         //device.default_input_config().ok().map(|c| c.into());
         self.input_device = Some(device);
 
@@ -641,23 +694,42 @@ impl AudioEngine {
             self.host = cpal::host_from_id(current_host_id)?;
         }
 
-        trace!("Reset host and devices, now selecting output device: {}", device_name);
+        trace!(
+            "Reset host and devices, now selecting output device: {}",
+            device_name
+        );
 
-        let device = self.host
+        let device = self
+            .host
             .output_devices()?
             .find(|d| d.name().map_or(false, |name| name == device_name))
             .ok_or_else(|| anyhow!("Output device '{}' not found", device_name))?;
 
-        trace!("Supported output configs: {:?}", device.supported_output_configs().map(|m| m.collect::<Vec<_>>()).unwrap_or_default());
+        trace!(
+            "Supported output configs: {:?}",
+            device
+                .supported_output_configs()
+                .map(|m| m.collect::<Vec<_>>())
+                .unwrap_or_default()
+        );
 
-        self.output_config = Some(pick_best_format(
-            device.supported_output_configs().unwrap(),
-            Some(48000), // No preferred sample rate
-            Some(256), // No preferred buffer size
-            Some(SampleFormat::I32), // No preferred sample format
-            Some(2), // No preferred channels
-        )
-            .ok_or_else(|| anyhow!("No supported input configurations for device '{}'", device_name)).unwrap().into());
+        self.output_config = Some(
+            pick_best_format(
+                device.supported_output_configs().unwrap(),
+                Some(48000),             // No preferred sample rate
+                Some(256),               // No preferred buffer size
+                Some(SampleFormat::I32), // No preferred sample format
+                Some(2),                 // No preferred channels
+            )
+            .ok_or_else(|| {
+                anyhow!(
+                    "No supported input configurations for device '{}'",
+                    device_name
+                )
+            })
+            .unwrap()
+            .into(),
+        );
         //device.default_output_config().ok().map(|c| c.into());
         self.output_device = Some(device);
 
@@ -683,7 +755,7 @@ impl AudioEngine {
     /// Set the sample rate
     pub fn set_sample_rate(&mut self, sample_rate: u32) -> Result<()> {
         self.current_sample_rate = sample_rate;
-        
+
         // Update configs if devices are available
         if let Some(ref mut config) = self.input_config {
             config.sample_rate = cpal::SampleRate(sample_rate);
@@ -702,7 +774,7 @@ impl AudioEngine {
     /// Set the buffer size
     pub fn set_buffer_size(&mut self, buffer_size: u32) -> Result<()> {
         self.current_buffer_size = buffer_size;
-        
+
         // Update configs if devices are available
         if let Some(ref mut config) = self.input_config {
             config.buffer_size = cpal::BufferSize::Fixed(buffer_size);
@@ -761,7 +833,7 @@ impl AudioEngine {
             output_events: std::ptr::null_mut(),
             process_context: std::ptr::null_mut(),
         });
-        
+
         self.process_data = new_process_data;
     }
 
@@ -786,7 +858,7 @@ impl AudioEngine {
 
         let ring = HeapRb::<f32>::new(buffer_size * channels * 2);
         let (mut producer, mut consumer) = ring.split();
-        
+
         let params = SincInterpolationParameters {
             sinc_len: 256,
             f_cutoff: 0.95,
@@ -794,7 +866,7 @@ impl AudioEngine {
             oversampling_factor: 256,
             window: WindowFunction::BlackmanHarris2,
         };
-        
+
         let mut resampler = SincFixedIn::<f32>::new(
             output_config.sample_rate.0 as f64 / input_config.sample_rate.0 as f64,
             2.0,
@@ -828,11 +900,11 @@ impl AudioEngine {
                 unsafe {
                     let plugins = plugin_modules.read().unwrap();
                     let plugin_list: Vec<_> = plugins.iter().collect();
-                    
+
                     // Process plugins in a chain - each plugin's output becomes the next plugin's input
                     for (index, (_plugin_id, plugin)) in plugin_list.iter().enumerate() {
                         let data = process_data.clone();
-                        
+
                         // For the first plugin, input comes from the audio input
                         // For subsequent plugins, we need to copy the previous plugin's output to current input
                         if index > 0 {
@@ -844,14 +916,14 @@ impl AudioEngine {
                                 }
                             }
                         }
-                        
+
                         // Clear the output buffer before processing
                         for i in 0..block_size {
                             for j in 0..channels {
                                 (*output_data.data.get())[j][i] = 0.0;
                             }
                         }
-                        
+
                         // Process the plugin
                         plugin
                             .processor
@@ -945,7 +1017,9 @@ impl AudioEngine {
         self.plugin_modules.read().unwrap()
     }
 
-    pub fn plugin_modules_mut(&mut self) -> RwLockWriteGuard<'_, FxHashMap<PluginId, VSTHostContext>> {
+    pub fn plugin_modules_mut(
+        &mut self,
+    ) -> RwLockWriteGuard<'_, FxHashMap<PluginId, VSTHostContext>> {
         self.plugin_modules.write().unwrap()
     }
 
@@ -967,14 +1041,19 @@ impl AudioEngine {
 
     /// Get list of all loaded plugin IDs
     pub fn get_loaded_plugin_ids(&self) -> Vec<PluginId> {
-        self.plugin_modules.read().unwrap().keys().copied().collect()
+        self.plugin_modules
+            .read()
+            .unwrap()
+            .keys()
+            .copied()
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cpal::{SampleFormat, SupportedStreamConfigRange, SampleRate, SupportedBufferSize};
+    use cpal::{SampleFormat, SampleRate, SupportedBufferSize, SupportedStreamConfigRange};
 
     fn make_range(fmt: SampleFormat) -> SupportedStreamConfigRange {
         SupportedStreamConfigRange::new(
@@ -982,22 +1061,22 @@ mod tests {
             SampleRate(44100),
             SampleRate(44100),
             SupportedBufferSize::Unknown,
-            fmt
+            fmt,
         )
     }
 
     fn make_range_with_config(
-        fmt: SampleFormat, 
-        min_rate: u32, 
-        max_rate: u32, 
-        buffer_size: SupportedBufferSize
+        fmt: SampleFormat,
+        min_rate: u32,
+        max_rate: u32,
+        buffer_size: SupportedBufferSize,
     ) -> SupportedStreamConfigRange {
         SupportedStreamConfigRange::new(
             2,
             SampleRate(min_rate),
             SampleRate(max_rate),
             buffer_size,
-            fmt
+            fmt,
         )
     }
 
@@ -1015,10 +1094,7 @@ mod tests {
 
     #[test]
     fn test_pick_best_format_prefers_i32_over_u32() {
-        let configs = vec![
-            make_range(SampleFormat::U32),
-            make_range(SampleFormat::I32),
-        ];
+        let configs = vec![make_range(SampleFormat::U32), make_range(SampleFormat::I32)];
         let result = pick_best_format(configs.into_iter(), None, None, None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().sample_format(), SampleFormat::I32);
@@ -1046,8 +1122,18 @@ mod tests {
     #[test]
     fn test_pick_best_format_prioritizes_sample_rate() {
         let configs = vec![
-            make_range_with_config(SampleFormat::F32, 22050, 22050, SupportedBufferSize::Unknown),
-            make_range_with_config(SampleFormat::I16, 44100, 44100, SupportedBufferSize::Unknown),
+            make_range_with_config(
+                SampleFormat::F32,
+                22050,
+                22050,
+                SupportedBufferSize::Unknown,
+            ),
+            make_range_with_config(
+                SampleFormat::I16,
+                44100,
+                44100,
+                SupportedBufferSize::Unknown,
+            ),
         ];
         let result = pick_best_format(configs.into_iter(), Some(44100), None, None, None);
         assert!(result.is_some());
@@ -1060,8 +1146,21 @@ mod tests {
     fn test_pick_best_format_prioritizes_buffer_size() {
         use cpal::SupportedBufferSize;
         let configs = vec![
-            make_range_with_config(SampleFormat::F32, 44100, 44100, SupportedBufferSize::Range { min: 128, max: 256 }),
-            make_range_with_config(SampleFormat::I16, 44100, 44100, SupportedBufferSize::Range { min: 512, max: 1024 }),
+            make_range_with_config(
+                SampleFormat::F32,
+                44100,
+                44100,
+                SupportedBufferSize::Range { min: 128, max: 256 },
+            ),
+            make_range_with_config(
+                SampleFormat::I16,
+                44100,
+                44100,
+                SupportedBufferSize::Range {
+                    min: 512,
+                    max: 1024,
+                },
+            ),
         ];
         let result = pick_best_format(configs.into_iter(), Some(44100), Some(512), None, None);
         assert!(result.is_some());
@@ -1070,11 +1169,14 @@ mod tests {
 
     #[test]
     fn test_pick_best_format_exact_format_match() {
-        let configs = vec![
-            make_range(SampleFormat::I16),
-            make_range(SampleFormat::F32),
-        ];
-        let result = pick_best_format(configs.into_iter(), None, None, Some(SampleFormat::I16), None);
+        let configs = vec![make_range(SampleFormat::I16), make_range(SampleFormat::F32)];
+        let result = pick_best_format(
+            configs.into_iter(),
+            None,
+            None,
+            Some(SampleFormat::I16),
+            None,
+        );
         assert!(result.is_some());
         assert_eq!(result.unwrap().sample_format(), SampleFormat::I16);
     }
@@ -1083,10 +1185,29 @@ mod tests {
     fn test_pick_best_format_all_preferences_match() {
         use cpal::SupportedBufferSize;
         let configs = vec![
-            make_range_with_config(SampleFormat::I16, 22050, 22050, SupportedBufferSize::Range { min: 128, max: 256 }),
-            make_range_with_config(SampleFormat::F32, 44100, 48000, SupportedBufferSize::Range { min: 512, max: 1024 }),
+            make_range_with_config(
+                SampleFormat::I16,
+                22050,
+                22050,
+                SupportedBufferSize::Range { min: 128, max: 256 },
+            ),
+            make_range_with_config(
+                SampleFormat::F32,
+                44100,
+                48000,
+                SupportedBufferSize::Range {
+                    min: 512,
+                    max: 1024,
+                },
+            ),
         ];
-        let result = pick_best_format(configs.into_iter(), Some(44100), Some(512), Some(SampleFormat::F32), None);
+        let result = pick_best_format(
+            configs.into_iter(),
+            Some(44100),
+            Some(512),
+            Some(SampleFormat::F32),
+            None,
+        );
         assert!(result.is_some());
         let config = result.unwrap();
         assert_eq!(config.sample_format(), SampleFormat::F32);

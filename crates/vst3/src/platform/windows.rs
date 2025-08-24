@@ -1,6 +1,6 @@
+use crate::{VSTPtr, base::funknown::IPluginFactory};
 use anyhow::Result;
 use libloading::{Library, Symbol};
-use crate::{VSTPtr, base::funknown::IPluginFactory};
 
 type InitDllProc = fn() -> bool;
 type ExitDllProc = fn() -> bool;
