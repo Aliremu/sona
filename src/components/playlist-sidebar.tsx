@@ -17,7 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ChevronDown, ChevronRight, Music, Plus, Play, Clock, Gauge, ChevronLeft, Menu } from "lucide-react"
+import { ChevronDown, ChevronRight, Music, Plus, Play, Clock, Gauge, ChevronLeft, Menu, Trash2 } from "lucide-react"
 
 interface Song {
   id: number
@@ -40,6 +40,7 @@ interface PlaylistSidebarProps {
   currentSong: Song
   onSongSelect: (song: Song, artistName: string) => void
   onAddPlaylist: (name: string) => void
+  onRemovePlaylist: (playlistId: number) => void
   onAddSong: (playlistId: number, song: Song) => void
   isCollapsed: boolean
   onToggleCollapse: () => void
@@ -51,6 +52,7 @@ export function PlaylistSidebar({
   currentSong,
   onSongSelect,
   onAddPlaylist,
+  onRemovePlaylist,
   onAddSong,
   isCollapsed,
   onToggleCollapse,
@@ -178,31 +180,47 @@ export function PlaylistSidebar({
               open={!isCollapsed && expandedPlaylists.includes(playlist.id)}
               onOpenChange={() => !isCollapsed && togglePlaylist(playlist.id)}
             >
-              <CollapsibleTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className={`w-full ${isCollapsed ? "justify-center px-2" : "justify-between px-3"} h-10 font-medium hover:bg-accent/20`}
-                  onClick={() => isCollapsed && onToggleCollapse()}
-                >
-                  <div className="flex items-center gap-2">
-                    <Music className="h-4 w-4 text-accent" />
-                    {!isCollapsed && (
-                      <>
-                        <span className="text-foreground">{playlist.name}</span>
-                        <Badge variant="secondary" className="text-xs bg-accent/20 text-accent border-accent/30">
-                          {playlist.songs.length}
-                        </Badge>
-                      </>
-                    )}
-                  </div>
-                  {!isCollapsed &&
-                    (expandedPlaylists.includes(playlist.id) ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    ))}
-                </Button>
-              </CollapsibleTrigger>
+              <div className="flex items-center w-full">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className={`flex-1 ${isCollapsed ? "justify-center px-2" : "justify-between px-3"} h-10 font-medium hover:bg-accent/20`}
+                    onClick={() => isCollapsed && onToggleCollapse()}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Music className="h-4 w-4 text-accent" />
+                      {!isCollapsed && (
+                        <>
+                          <span className="text-foreground">{playlist.name}</span>
+                          <Badge variant="secondary" className="text-xs bg-accent/20 text-accent border-accent/30">
+                            {playlist.songs.length}
+                          </Badge>
+                        </>
+                      )}
+                    </div>
+                    {!isCollapsed &&
+                      (expandedPlaylists.includes(playlist.id) ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      ))}
+                  </Button>
+                </CollapsibleTrigger>
+                {!isCollapsed && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 ml-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemovePlaylist(playlist.id);
+                    }}
+                    title="Remove playlist"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
               {!isCollapsed && (
                 <CollapsibleContent className="space-y-1">
                   {playlist.songs.map((song) => (

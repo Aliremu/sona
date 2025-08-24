@@ -208,6 +208,16 @@ export default function MusicPracticeApp() {
     setPlaylists([...playlists, newPlaylist])
   }
 
+  const removePlaylist = (playlistId: number) => {
+    const playlist = playlists.find(p => p.id === playlistId)
+    if (playlist && playlist.songs.length > 0) {
+      if (!window.confirm(`Are you sure you want to remove "${playlist.name}"? This playlist contains ${playlist.songs.length} song(s) and cannot be undone.`)) {
+        return
+      }
+    }
+    setPlaylists(playlists.filter((playlist) => playlist.id !== playlistId))
+  }
+
   const addSongToPlaylist = (playlistId: number, song: any) => {
     setPlaylists(
       playlists.map((playlist) =>
@@ -227,6 +237,7 @@ export default function MusicPracticeApp() {
         currentSong={currentSong}
         onSongSelect={handleSongSelect}
         onAddPlaylist={addNewPlaylist}
+        onRemovePlaylist={removePlaylist}
         onAddSong={addSongToPlaylist}
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}

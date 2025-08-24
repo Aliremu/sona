@@ -856,7 +856,7 @@ impl AudioEngine {
         let plugin_modules = self.plugin_modules.clone();
         let buffer_size = self.current_buffer_size as usize;
 
-        let ring = HeapRb::<f32>::new(buffer_size * channels * 2);
+        let ring = HeapRb::<f32>::new(buffer_size * channels * 8);
         let (mut producer, mut consumer) = ring.split();
 
         let params = SincInterpolationParameters {
@@ -898,38 +898,37 @@ impl AudioEngine {
                 }
 
                 unsafe {
-                    let plugins = plugin_modules.read().unwrap();
-                    let plugin_list: Vec<_> = plugins.iter().collect();
+                    if let Ok(plugins) = plugin_modules.try_read() {
+                        // Process plugins in a chain - each plugin's output becomes the next plugin's input
+                        for (index, (_plugin_id, plugin)) in plugins.iter().enumerate() {
+                            let data = process_data.clone();
 
-                    // Process plugins in a chain - each plugin's output becomes the next plugin's input
-                    for (index, (_plugin_id, plugin)) in plugin_list.iter().enumerate() {
-                        let data = process_data.clone();
-
-                        // For the first plugin, input comes from the audio input
-                        // For subsequent plugins, we need to copy the previous plugin's output to current input
-                        if index > 0 {
-                            // Copy output_data to input_data for chaining
-                            for i in 0..block_size {
-                                for j in 0..channels {
-                                    let sample = (*output_data.data.get())[j][i];
-                                    input_data.write(j, i, sample);
+                            // For the first plugin, input comes from the audio input
+                            // For subsequent plugins, we need to copy the previous plugin's output to current input
+                            if index > 0 {
+                                // Copy output_data to input_data for chaining
+                                for i in 0..block_size {
+                                    for j in 0..channels {
+                                        let sample = (*output_data.data.get())[j][i];
+                                        input_data.write(j, i, sample);
+                                    }
                                 }
                             }
-                        }
 
-                        // Clear the output buffer before processing
-                        for i in 0..block_size {
-                            for j in 0..channels {
-                                (*output_data.data.get())[j][i] = 0.0;
+                            // Clear the output buffer before processing
+                            for i in 0..block_size {
+                                for j in 0..channels {
+                                    (*output_data.data.get())[j][i] = 0.0;
+                                }
                             }
-                        }
 
-                        // Process the plugin
-                        plugin
-                            .processor
-                            .as_ref()
-                            .unwrap()
-                            .process(Arc::into_raw(data) as *mut _);
+                            // Process the plugin
+                            plugin
+                                .processor
+                                .as_ref()
+                                .unwrap()
+                                .process(Arc::into_raw(data) as *mut _);
+                        }
                     }
                 }
 

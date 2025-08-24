@@ -602,7 +602,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                         Plugin Settings
                       </Label>
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                        {/* <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
                           <div>
                             <Label htmlFor="auto-suspend" className="text-sm font-medium">
                               Auto-suspend inactive plugins
@@ -623,7 +623,7 @@ export function SettingsModal({ open, onOpenChange }: SettingsModalProps) {
                             </p>
                           </div>
                           <Switch id="plugin-delay" defaultChecked className="data-[state=checked]:bg-accent" />
-                        </div>
+                        </div> */}
                       </div>
                     </div>
 
