@@ -1,4 +1,4 @@
-# 🎸 Sona
+# Sona
 
 A modern desktop application for efficient guitar practicing, built with Rust and React in Tauri.
 
