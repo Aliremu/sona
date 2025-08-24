@@ -1,8 +1,7 @@
 #![allow(unused_variables)]
 
 use std::{
-    ffi::{c_char, c_void, CStr},
-    sync::Arc,
+    ffi::{c_char, c_void, CStr}, sync::Arc
 };
 
 use anyhow::Result;
@@ -32,8 +31,27 @@ use vst3::{
 };
 use rustc_hash::FxHashMap;
 
+/// Unique identifier for loaded plugins
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct PluginId(pub u64);
+
+impl PluginId {
+    pub fn new() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        PluginId(NEXT_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl From<PluginId> for String {
+    fn from(id: PluginId) -> Self {
+        id.0.to_string()
+    }
+}
+
 #[derive(Default)]
 pub struct VSTHostContext {
+    pub id: PluginId,
     pub name: String,
     pub module: Option<Module>,
     pub factory: Option<VSTPtr<IPluginFactory>>,
@@ -47,6 +65,10 @@ pub struct VSTHostContext {
 
     pub component_connection: Option<VSTPtr<IConnectionPoint>>,
     pub controller_connection: Option<VSTPtr<IConnectionPoint>>,
+
+    pub host_frame: Option<*mut HostPlugFrame>,
+
+    pub bypass: bool,
 }
 
 unsafe impl Sync for VSTHostContext {}
@@ -55,10 +77,13 @@ unsafe impl Send for VSTHostContext {}
 impl VSTHostContext {
     pub fn new(path: &str) -> Result<Self> {
         unsafe {
+            let plugin_id = PluginId::new();
+
             let mut module = Module::new(path)?;
             let factory = module.get_factory()?;
 
             let mut ctx = Self::default();
+            ctx.id = plugin_id;
 
             let mut factory_info = PFactoryInfo::default();
             factory.get_factory_info(&mut factory_info);
@@ -118,7 +143,7 @@ impl VSTHostContext {
                     process_mode: ProcessMode::Realtime,
                     symbolic_sample_size: SymbolicSampleSize::Sample32,
                     max_samples_per_block: 2048,
-                    sample_rate: 44100.0,
+                    sample_rate: 48000.0,
                 };
                 let res = processor.setup_processing(&mut data);
 
@@ -155,9 +180,13 @@ impl VSTHostContext {
                 let res = edit.set_component_handler(Arc::into_raw(handler.clone()) as *mut _);
 
                 let view = edit.create_view(ViewType::Editor);
-                (*(view)).set_frame(
-                    Box::into_raw(Box::new(HostPlugFrame::new())) as *mut _ as *mut IPlugFrame
-                );
+                
+                // Create the frame on the heap for FFI safety
+                let host_frame = Box::into_raw(Box::new(HostPlugFrame::new()));
+                (*(view)).set_frame(host_frame as *mut _ as *mut IPlugFrame);
+                
+                // Store the frame pointer for cleanup later
+                ctx.host_frame = Some(host_frame);
 
                 warn!(
                     "{} {:?} {:?} {:?} {:?}",
@@ -178,12 +207,46 @@ impl VSTHostContext {
             Ok(ctx)
         }
     }
+
+    /// Safely set a window resize callback on the HostPlugFrame
+    /// This method ensures the frame exists and provides safe access to it
+    pub fn set_window_resize_callback<F>(&mut self, callback: F) 
+    where 
+        F: FnMut(&mut IPlugView, &mut ViewRect) + Send + 'static 
+    {
+        if let Some(frame_ptr) = self.host_frame {
+            unsafe {
+                (*frame_ptr).on_window_resize = Some(Box::new(callback));
+            }
+        }
+    }
+
+    /// Get a reference to the HostPlugFrame if it exists
+    /// Use this for other operations on the frame
+    pub fn with_frame<F, R>(&mut self, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut HostPlugFrame) -> R
+    {
+        if let Some(frame_ptr) = self.host_frame {
+            unsafe {
+                Some(f(&mut *frame_ptr))
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl Drop for VSTHostContext {
     fn drop(&mut self) {
         unsafe {
             warn!("Dropping VSTHostContext!");
+
+            // Clean up the frame first if it exists
+            if let Some(frame_ptr) = self.host_frame.take() {
+                let _frame = Box::from_raw(frame_ptr);
+                // Box automatically drops and deallocates
+            }
 
             self.controller_connection.take().unwrap().release();
             self.component_connection.take().unwrap().release();
@@ -371,6 +434,7 @@ impl IComponentHandler2_HostImpl for HostComponentHandler {
 #[repr(C)]
 pub struct HostPlugFrame {
     vtable: &'static [*const (); 4],
+    pub on_window_resize: Option<Box<dyn FnMut(&mut IPlugView, &mut ViewRect) + Send + 'static>>,
 }
 
 impl HostPlugFrame {
@@ -382,6 +446,7 @@ impl HostPlugFrame {
                 <Self as FUnknown_HostImpl>::release as *const _,
                 <Self as IPlugFrame_HostImpl>::resize_view as *const _,
             ],
+            on_window_resize: None,
         }
     }
 }
@@ -400,7 +465,12 @@ impl FUnknown_HostImpl for HostPlugFrame {}
 
 impl IPlugFrame_HostImpl for HostPlugFrame {
     unsafe fn resize_view(&mut self, view: *mut IPlugView, new_size: *mut ViewRect) -> TResult {
-        warn!("HostPlugFrame::resize_view: {:?}", *new_size);
+        trace!("HostPlugFrame::resize_view: {:?}", *new_size);
+
+        if let Some(ref mut on_window_resize) = self.on_window_resize {
+            on_window_resize(&mut *view, &mut *new_size);
+        }
+
         TResult::ResultOk
     }
 }

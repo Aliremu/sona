@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { SheetMusicViewer } from "@/components/sheet-music-viewer"
 import { AudioVisualizer } from "@/components/audio-visualizer"
 import { VideoPlayer } from "@/components/video-player"
@@ -14,7 +16,7 @@ import { UnifiedControls } from "@/components/unified-controls"
 import { SongInfoModal } from "@/components/song-info-modal"
 import { PracticeStatsModal } from "@/components/practice-stats-modal"
 import { SettingsModal } from "@/components/settings-modal"
-import { Play, FileMusic, Info, BarChart3, Settings, AudioWaveform, Sun, Moon } from "lucide-react"
+import { Play, FileMusic, Info, BarChart3, Settings, AudioWaveform, Sun, Moon, Plus } from "lucide-react"
 import { Titlebar } from "@/components/title-bar"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -102,14 +104,22 @@ export default function MusicPracticeApp() {
   const [activeTab, setActiveTab] = useState("video")
   const videoRef = useRef<HTMLVideoElement>(null)
 
+  type PluginInfo = {
+    id: number
+    name: string
+  }
+
+  const [discoveredPlugins, setDiscoveredPlugins] = useState<string[]>([])
+  const [showPluginDialog, setShowPluginDialog] = useState(false)
+
   useEffect(() => {
     async function run() {
-      const response: string[] = await invoke("get_loaded_plugins");
+      const response: PluginInfo[] = await invoke("get_loaded_plugins");
       let plugins = [];
-      for (const [i, plugin] of response.entries()) {
+      for (const plugin of response) {
         plugins.push({
-          id: i,
-          name: plugin,
+          id: plugin.id,
+          name: plugin.name,
           enabled: true,
           type: "Reverb",
           color: "red",
@@ -117,6 +127,10 @@ export default function MusicPracticeApp() {
       }
 
       setPlugins(plugins);
+
+      // Also load discovered plugins
+      const discovered: string[] = await invoke("get_discovered_plugins");
+      setDiscoveredPlugins(discovered);
     }
 
     run();
@@ -129,23 +143,44 @@ export default function MusicPracticeApp() {
   }
 
   const addPlugin = () => {
-    const colors = ["emerald", "blue", "purple", "orange", "pink", "cyan", "yellow", "red"]
-    const types = ["EQ", "Reverb", "Dynamics", "Time", "Modulation", "Distortion"]
-    const newId = plugins.length > 0 ? Math.max(...plugins.map((p) => p.id)) + 1 : 1
-    setPlugins([
-      ...plugins,
-      {
-        id: newId,
-        name: "New Plugin",
-        enabled: true,
-        type: types[Math.floor(Math.random() * types.length)],
-        color: colors[Math.floor(Math.random() * colors.length)],
-      },
-    ])
+    setShowPluginDialog(true)
+  }
+
+  const loadPlugin = async (pluginPath: string) => {
+    try {
+      await invoke("load_plugin", { path: pluginPath });
+      // Refresh the loaded plugins list
+      const response: PluginInfo[] = await invoke("get_loaded_plugins");
+      let plugins = [];
+      for (const plugin of response) {
+        plugins.push({
+          id: plugin.id,
+          name: plugin.name,
+          enabled: true,
+          type: "VST",
+          color: "blue",
+        });
+      }
+      setPlugins(plugins);
+      setShowPluginDialog(false);
+    } catch (error) {
+      console.error("Failed to load plugin:", error);
+    }
   }
 
   const removePlugin = (id: number) => {
+    invoke("remove_plugin", { pluginId: id }).catch((error) => {
+      console.error("Failed to remove plugin:", error);
+    });
     setPlugins(plugins.filter((plugin) => plugin.id !== id))
+  }
+
+  const openPluginEditor = async (id: number) => {
+    try {
+      await invoke("open_plugin_editor", { pluginId: id });
+    } catch (error) {
+      console.error("Failed to open plugin editor:", error);
+    }
   }
 
   const handlePageChange = (newPage: number) => {
@@ -204,9 +239,59 @@ export default function MusicPracticeApp() {
             onTogglePlugin={togglePlugin}
             onAddPlugin={addPlugin}
             onRemovePlugin={removePlugin}
+            onOpenPluginEditor={openPluginEditor}
             onExpandSidebar={() => setSidebarCollapsed(false)}
         />
       </PlaylistSidebar>
+
+      {/* Plugin Selection Dialog */}
+      <Dialog open={showPluginDialog} onOpenChange={setShowPluginDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Add VST Plugin</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              Select a plugin to add to your rack:
+            </p>
+            <ScrollArea className="h-[300px] w-full rounded-md border p-4">
+              <div className="space-y-2">
+                {discoveredPlugins.map((pluginPath, index) => {
+                  const pluginName = pluginPath.split(/[/\\]/).pop()?.replace(/\.(dll|vst3)$/i, '') || pluginPath;
+                  return (
+                    <Button
+                      key={index}
+                      variant="ghost"
+                      className="w-full justify-start h-auto p-4 border border-border/50 hover:border-border hover:bg-accent/50"
+                      onClick={() => loadPlugin(pluginPath)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded bg-primary/10 flex items-center justify-center">
+                          <Plus className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="text-left">
+                          <div className="font-medium">{pluginName}</div>
+                          <div className="text-xs text-muted-foreground truncate max-w-[280px]">
+                            {pluginPath}
+                          </div>
+                        </div>
+                      </div>
+                    </Button>
+                  );
+                })}
+                {discoveredPlugins.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>No plugins discovered.</p>
+                    <p className="text-xs mt-2">
+                      Check your plugin paths in settings and scan for plugins.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">

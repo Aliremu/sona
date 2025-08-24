@@ -16,25 +16,9 @@ use vst3::vst::audio_processor::{
 };
 use vst::host::{HostParameterChanges, VSTHostContext};
 
+use crate::vst::host::PluginId;
+
 pub mod vst;
-
-/// Unique identifier for loaded plugins
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PluginId(u64);
-
-impl PluginId {
-    fn new() -> Self {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-        PluginId(NEXT_ID.fetch_add(1, Ordering::Relaxed))
-    }
-}
-
-impl From<PluginId> for String {
-    fn from(id: PluginId) -> Self {
-        id.0.to_string()
-    }
-}
 
 #[repr(C)]
 #[derive(Clone)]
@@ -324,7 +308,7 @@ impl Default for AudioEngine {
                 
                 let sample_rate = input_cfg.as_ref()
                     .map(|c: &StreamConfig| c.sample_rate.0)
-                    .unwrap_or(44100);
+                    .unwrap_or(48000);
                 let buffer_size = input_cfg.as_ref()
                     .and_then(|c: &StreamConfig| {
                         match c.buffer_size {
@@ -336,7 +320,7 @@ impl Default for AudioEngine {
                     
                 (input_cfg, output_cfg, sample_rate, buffer_size)
             } else {
-                (None, None, 44100, 512)
+                (None, None, 48000, 512)
             };
 
         info!("Creating AudioEngine with:\n\tHost: {:?}\n\tInput: {:?}\n\tOutput: {:?}", 
@@ -930,16 +914,30 @@ impl AudioEngine {
 
     /// Add a VST plugin to the processing chain
     pub fn load_plugin(&mut self, path: &str) -> Result<PluginId> {
+        info!("Loading plugin: {:?}", path);
+
         let mut plugin = VSTHostContext::new(path)?;
 
         unsafe {
             plugin.processor.as_mut().unwrap().set_processing(true);
         }
 
-        let plugin_id = PluginId::new();
-        self.plugin_modules.write().unwrap().insert(plugin_id, plugin);
-        info!("Added plugin: {} with ID: {:?}", path, plugin_id);
-        Ok(plugin_id)
+        let id = plugin.id;
+
+        self.plugin_modules.write().unwrap().insert(id, plugin);
+        info!("Successfully loaded plugin: {} with ID: {:?}", path, id);
+        Ok(id)
+    }
+
+    /// Remove a plugin from the processing chain, and thus invalidates its context
+    pub fn remove_plugin(&mut self, plugin_id: PluginId) -> Result<()> {
+        match self.plugin_modules.write().unwrap().remove(&plugin_id) {
+            Some(_) => {
+                info!("Removed plugin with ID: {:?}", plugin_id);
+                Ok(())
+            }
+            None => Err(anyhow!("Plugin with ID {:?} not found", plugin_id)),
+        }
     }
 
     /// Get reference to loaded plugin modules

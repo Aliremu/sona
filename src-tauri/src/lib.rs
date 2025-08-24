@@ -1,5 +1,5 @@
 use audio::AudioEngine;
-use log::{error, info};
+use log::{error, info, trace};
 use serde_json::json;
 use tauri_plugin_store::StoreExt;
 use tracing_subscriber::EnvFilter;
@@ -12,6 +12,7 @@ use vst3::base::funknown::IComponent_Impl;
 use vst3::{base::funknown::IPlugView_Impl, gui::plug_view::PlatformType};
 use vst3::{base::funknown::IPluginFactory_Impl, gui::plug_view::ViewRect};
 
+use crate::commands::load_plugin;
 use crate::plugins::PluginRegistry;
 
 mod commands;
@@ -20,57 +21,6 @@ mod settings;
 
 type GlobalAudio = Mutex<AudioEngine>;
 type GlobalPluginRegistry = Mutex<PluginRegistry>;
-
-fn open_plugin(manager: &tauri::AppHandle, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let audio_state = manager.state::<GlobalAudio>();
-    let mut engine = audio_state.lock().unwrap();
-    // engine.run();
-
-    unsafe {
-        let plugin_id = engine.load_plugin(path)?;
-        let modules = engine.plugin_modules();
-
-        // Get the first plugin (any plugin from the map)
-        let plugin = modules.get(&plugin_id).unwrap();
-
-        let window = tauri::WindowBuilder::new(manager, plugin_id).build()?;
-        window.set_title(&plugin.name);
-        let hwnd = window.hwnd()?.0;
-
-        // plugin.component.unwrap().set_active(false);
-
-        let view = plugin.view.unwrap();
-
-        #[cfg(target_os = "windows")]
-        view.attached(hwnd as *mut c_void, PlatformType::HWND);
-
-        #[cfg(target_os = "macos")]
-        view.attached(hwnd as *mut c_void, PlatformType::NSView);
-
-        let mut rect = ViewRect::default();
-        view.check_size_constraint(&mut rect);
-
-        let new_size = PhysicalSize::new(rect.right, rect.bottom).to_logical::<i32>(window.scale_factor().unwrap());
-        // LogicalSize::new(rect.right, rect.bottom).to_physical::<i32>(window.scale_factor().unwrap());
-        let _ = window.set_size(new_size);
-
-        window.clone().on_window_event(move |event| {
-            if let tauri::WindowEvent::Resized(size) = event {
-                let mut new_size = ViewRect::default();
-                new_size.right = size.width as i32;
-                new_size.bottom = size.height as i32;
-
-                view.on_size(&mut new_size);
-
-                view.check_size_constraint(&mut new_size);
-                let new_size = PhysicalSize::new(new_size.right, new_size.bottom).to_logical::<i32>(window.scale_factor().unwrap());
-                let _ = window.set_size(new_size);
-            }
-        });
-    }
-
-    Ok(())
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -102,18 +52,14 @@ pub fn run() {
             commands::browse_directory,
             commands::scan_plugins,
             commands::get_cpu_usage,
-            commands::get_loaded_plugins
+            commands::get_loaded_plugins,
+            commands::load_plugin,
+            commands::remove_plugin,
+            commands::open_plugin_editor,
         ])
         .setup(|app| {
             app.manage(Mutex::new(settings::create_audio_engine_from_settings(app.app_handle())));
-
-            let plugin_registry = settings::create_plugin_registry_from_settings(app.app_handle());
-
-            for plugin in plugin_registry.get_discovered_plugins() {
-                info!("Loading plugin: {:?}", plugin);
-                let _ = open_plugin(app.app_handle(), plugin).map_err(|err| error!("{:?}", err));
-            }
-            app.manage(Mutex::new(plugin_registry));
+            app.manage(Mutex::new(settings::create_plugin_registry_from_settings(app.app_handle())));
 
             Ok(())
         })

@@ -3,7 +3,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { Label } from "@/components/ui/label"
-import { ChevronUp, ChevronDown, Plus, Sliders, Trash2 } from "lucide-react"
+import { ChevronUp, ChevronDown, Plus, Sliders, Trash2, Settings } from "lucide-react"
 
 interface Plugin {
   id: number
@@ -21,6 +21,7 @@ interface VstDockProps {
   onAddPlugin: () => void
   onTogglePlugin: (id: number) => void
   onRemovePlugin: (id: number) => void
+  onOpenPluginEditor: (id: number) => void
   onExpandSidebar?: () => void
 }
 
@@ -32,6 +33,7 @@ export function VstDock({
   onAddPlugin,
   onTogglePlugin,
   onRemovePlugin,
+  onOpenPluginEditor,
   onExpandSidebar,
 }: VstDockProps) {
   // If sidebar is collapsed, show just a clickable icon
@@ -108,6 +110,15 @@ export function VstDock({
                 <div className="w-20">
                   <Slider defaultValue={[75]} max={100} step={1} className="h-1" />
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  onClick={() => onOpenPluginEditor(plugin.id)}
+                  title="Open Plugin Editor"
+                >
+                  <Settings className="h-3 w-3" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
